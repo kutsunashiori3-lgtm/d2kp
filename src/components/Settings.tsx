@@ -17,21 +17,73 @@ import {
   Clock,
   Trash2,
   Info,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Lock,
 } from 'lucide-react';
+import { changeUserPassword, AuthUser } from '../services/authService';
 
 interface SettingsProps {
   settings: AppSettings;
   onSettingsChanged: (newSettings: AppSettings) => void;
   onDataReset: () => void;
+  currentUser?: AuthUser | null;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
   settings,
   onSettingsChanged,
   onDataReset,
+  currentUser,
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>({ ...settings });
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+
+  // Password change state
+  const [oldPassword, setOldPassword] = useState<string>('');
+  const [newPassword, setNewPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [showOldPass, setShowOldPass] = useState<boolean>(false);
+  const [showNewPass, setShowNewPass] = useState<boolean>(false);
+  const [isChangingPass, setIsChangingPass] = useState<boolean>(false);
+  const [passFeedback, setPassFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassFeedback(null);
+
+    if (!oldPassword || !newPassword) {
+      setPassFeedback({ type: 'error', message: 'Semua kolom password wajib diisi.' });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPassFeedback({ type: 'error', message: 'Password baru minimal 8 karakter.' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPassFeedback({ type: 'error', message: 'Konfirmasi password baru tidak sesuai.' });
+      return;
+    }
+
+    setIsChangingPass(true);
+    try {
+      const res = await changeUserPassword(oldPassword, newPassword, confirmPassword);
+      setPassFeedback({ type: 'success', message: res.message });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: unknown) {
+      setPassFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal memperbarui password.',
+      });
+    } finally {
+      setIsChangingPass(false);
+    }
+  };
 
   const handleSave = async (updated: AppSettings) => {
     setLocalSettings(updated);
@@ -275,6 +327,128 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Keamanan Akun & Ubah Password */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <div className="flex items-center gap-2 text-slate-900 font-bold text-sm pb-4 border-b border-slate-100">
+          <KeyRound className="w-4 h-4 text-blue-600" />
+          <span>Keamanan Akun & Ubah Password</span>
+        </div>
+
+        <p className="text-xs text-slate-500 mt-3 mb-4">
+          Akun saat ini: <strong className="text-slate-800 font-mono">{currentUser?.username || 'arik'}</strong> ({currentUser?.role === 'admin' ? 'Administrator' : 'User'}). Ubah password secara berkala untuk menjaga integritas sistem presensi.
+        </p>
+
+        {passFeedback && (
+          <div
+            className={`p-3.5 mb-4 rounded-xl text-xs font-medium flex items-center gap-2 border ${
+              passFeedback.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-rose-50 text-rose-800 border-rose-200'
+            }`}
+          >
+            {passFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{passFeedback.message}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Password Lama
+            </label>
+            <div className="relative rounded-xl">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <Lock className="w-4 h-4" />
+              </div>
+              <input
+                type={showOldPass ? 'text' : 'password'}
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                className="w-full text-xs pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowOldPass(!showOldPass)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+              >
+                {showOldPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Password Baru (Minimal 8 Karakter)
+            </label>
+            <div className="relative rounded-xl">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <input
+                type={showNewPass ? 'text' : 'password'}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                minLength={8}
+                className="w-full text-xs pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPass(!showNewPass)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+              >
+                {showNewPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Konfirmasi Password Baru
+            </label>
+            <div className="relative rounded-xl">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <input
+                type={showNewPass ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                minLength={8}
+                className="w-full text-xs pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isChangingPass}
+            className="px-4 py-2 bg-blue-900 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+          >
+            {isChangingPass ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Menyimpan Password...</span>
+              </>
+            ) : (
+              <>
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Simpan Password Baru</span>
+              </>
+            )}
+          </button>
+        </form>
       </div>
 
       {/* Danger Zone */}

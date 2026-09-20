@@ -1,0 +1,11 @@
+[
+  {
+    "id": "usr_b38953777adcc379",
+    "username": "arik",
+    "password_hash": "$2b$10$CGfHYv40mfn2eiP1quVgeOhydyfmUFMs8HAwzM7zUy.6e32JkuqQq",
+    "role": "admin",
+    "created_at": 1789896039070,
+    "updated_at": 1789896039070,
+    "last_login": 1789896071572
+  }
+]
