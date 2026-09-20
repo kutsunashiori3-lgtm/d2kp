@@ -1,0 +1,10 @@
+{
+  "name": "Face Recognition Pegawai",
+  "description": "Aplikasi pengenalan wajah pegawai berbasis web lokal yang menghubungkan database foto dan data Excel untuk identifikasi real-time.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
