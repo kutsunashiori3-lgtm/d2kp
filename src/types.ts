@@ -95,3 +95,25 @@ export interface DetectedFaceResult {
   isConfirmed?: boolean;
   livenessPassed?: boolean;
 }
+
+export interface ServerDatabaseStatus {
+  ready: boolean;
+  version: number;
+  employeeCount: number;
+  photoCount: number;
+  embeddingCount: number;
+  excelFileName?: string;
+  lastUpdated: string;
+  storageReady: boolean;
+  storagePath?: string;
+}
+
+export interface ServerBackupInfo {
+  id: string;
+  fileName: string;
+  sizeBytes: number;
+  createdAt: number;
+  employeeCount: number;
+  photoCount: number;
+  embeddingCount: number;
+}

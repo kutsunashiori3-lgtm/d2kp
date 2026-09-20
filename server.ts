@@ -10,16 +10,51 @@ import fs from 'fs';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
+import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
+import {
+  initStorageDirectories,
+  getServerStatus,
+  getAllServerEmployees,
+  saveServerEmployees,
+  getServerEmployeeById,
+  getAllEmbeddings,
+  saveEmbeddings,
+  savePhotoFile,
+  getPhotoFilePath,
+  saveMasterExcelFile,
+  parseExcelBuffer,
+  getServerSettings,
+  saveServerSettings,
+  getServerLogs,
+  appendServerLog,
+  clearServerLogs,
+  createBackup,
+  listBackups,
+  restoreBackup,
+  resetServerDatabase,
+  STORAGE_PATH,
+  ServerEmployee,
+} from './server/storage';
 
 const PORT = 3000;
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(cookieParser());
 
 // Trust proxy for secure cookies in Cloud Run / Nginx
 app.set('trust proxy', 1);
+
+// Initialize persistent master storage directories
+initStorageDirectories();
+
+// Multer memory upload handler
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+});
 
 // ==========================================
 // 1. Storage & User Database (data/users.json)
@@ -419,13 +454,15 @@ app.post('/api/auth/change-password', requireAuth, (req: AuthenticatedRequest, r
 });
 
 // ==========================================
-// 6. Protected Business & Admin API Endpoints
+// 6. Server Master Database & Business API Endpoints
 // ==========================================
 
 // GET /api/database/status (Protected)
 app.get('/api/database/status', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const status = getServerStatus();
   res.json({
     status: 'ok',
+    ...status,
     serverTime: Date.now(),
     authenticatedUser: req.sessionUser?.username,
     role: req.sessionUser?.role,
@@ -434,28 +471,412 @@ app.get('/api/database/status', requireAuth, (req: AuthenticatedRequest, res: Re
 
 // GET /api/employees (Protected)
 app.get('/api/employees', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const employees = getAllServerEmployees();
   res.json({
     status: 'ok',
-    storage: 'IndexedDB (Local Client Biometrics)',
+    total: employees.length,
+    employees,
     user: req.sessionUser?.username,
   });
 });
 
-// Admin Only Endpoints
-app.post('/api/admin/upload-excel', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, message: 'Excel import authorized for admin.' });
+// GET /api/employees/:nomor_induk (Protected)
+app.get('/api/employees/:nomor_induk', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const emp = getServerEmployeeById(req.params.nomor_induk);
+  if (!emp) {
+    res.status(404).json({ error: 'Pegawai tidak ditemukan di server.' });
+    return;
+  }
+  res.json({ status: 'ok', employee: emp });
 });
 
-app.post('/api/admin/upload-photos', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, message: 'Photo folder import authorized for admin.' });
+// GET /api/face-database (Protected)
+app.get('/api/face-database', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const embeddings = getAllEmbeddings();
+  const status = getServerStatus();
+  res.json({
+    status: 'ok',
+    version: status.version,
+    count: Object.keys(embeddings).length,
+    embeddings,
+  });
 });
 
+// GET /api/photos/:nomor_induk (Public / Session cached for <img> tags)
+app.get('/api/photos/:nomor_induk', (req: Request, res: Response) => {
+  const photoPath = getPhotoFilePath(req.params.nomor_induk);
+  if (!photoPath) {
+    res.status(404).json({ error: 'Foto tidak ditemukan di storage server.' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(photoPath);
+});
+
+// GET & POST /api/settings (Protected)
+app.get('/api/settings', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const settings = getServerSettings();
+  res.json({ status: 'ok', settings });
+});
+
+app.post('/api/settings', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  if (req.body && typeof req.body === 'object') {
+    saveServerSettings(req.body);
+    res.json({ success: true, message: 'Pengaturan server berhasil disimpan.' });
+  } else {
+    res.status(400).json({ error: 'Format pengaturan tidak valid.' });
+  }
+});
+
+// GET, POST, DELETE /api/history (Protected)
+app.get('/api/history', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const logs = getServerLogs();
+  res.json({ status: 'ok', logs });
+});
+
+app.post('/api/history', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  if (req.body && typeof req.body === 'object') {
+    appendServerLog(req.body);
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: 'Format log tidak valid.' });
+  }
+});
+
+app.delete('/api/history', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  clearServerLogs();
+  res.json({ success: true, message: 'Riwayat presensi berhasil dibersihkan.' });
+});
+
+// Admin: Upload Excel file
+app.post('/api/admin/upload-excel', requireAdmin, upload.single('file'), (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let fileBuffer: Buffer | null = null;
+    let fileName = 'pegawai.xlsx';
+    let incomingEmployees: ServerEmployee[] | null = null;
+
+    if (req.file && req.file.buffer) {
+      fileBuffer = req.file.buffer;
+      fileName = req.file.originalname || 'pegawai.xlsx';
+    } else if (req.body && req.body.excelBase64) {
+      fileBuffer = Buffer.from(req.body.excelBase64, 'base64');
+      if (req.body.fileName) fileName = req.body.fileName;
+    }
+
+    if (req.body && Array.isArray(req.body.employees)) {
+      incomingEmployees = req.body.employees;
+    }
+
+    if (fileBuffer) {
+      saveMasterExcelFile(fileBuffer, fileName);
+    }
+
+    // If client already parsed employees and sent them:
+    if (incomingEmployees && incomingEmployees.length > 0) {
+      const existing = getAllServerEmployees();
+      const existingMap = new Map<string, ServerEmployee>();
+      existing.forEach((e) => existingMap.set(e.nomor_induk, e));
+
+      // Merge to preserve existing photo and embedding if already uploaded
+      const merged = incomingEmployees.map((emp) => {
+        const prev = existingMap.get(emp.nomor_induk);
+        if (prev) {
+          return {
+            ...emp,
+            hasPhoto: prev.hasPhoto,
+            photoFileName: prev.photoFileName || emp.photoFileName,
+            photoUrl: prev.photoUrl || emp.photoUrl,
+            faceDescriptor: prev.faceDescriptor || emp.faceDescriptor,
+            photoStatus: prev.photoStatus !== 'no_photo' ? prev.photoStatus : emp.photoStatus,
+            updatedAt: Date.now(),
+          };
+        }
+        return {
+          ...emp,
+          updatedAt: Date.now(),
+        };
+      });
+
+      saveServerEmployees(merged);
+      const status = getServerStatus();
+      res.json({
+        success: true,
+        message: `Berhasil mengunggah dan menyimpan ${merged.length} data pegawai ke server master.`,
+        employeeCount: merged.length,
+        version: status.version,
+      });
+      return;
+    }
+
+    // If only fileBuffer was sent, parse it directly on the server!
+    if (fileBuffer) {
+      const rawRows = parseExcelBuffer(fileBuffer);
+      if (rawRows.length > 0) {
+        const existing = getAllServerEmployees();
+        const existingMap = new Map<string, ServerEmployee>();
+        existing.forEach((e) => existingMap.set(e.nomor_induk, e));
+
+        const parsedList: ServerEmployee[] = [];
+        for (const row of rawRows) {
+          // Detect primary key
+          const rawId = (row['NOMOR INDUK'] || row['Nomor Induk'] || row['NIP'] || row['ID'] || row['nomor_induk'] || '') as string;
+          const rawName = (row['NAMA LENGKAP'] || row['Nama Lengkap'] || row['NAMA'] || row['Nama'] || row['nama'] || '') as string;
+
+          const nomorInduk = String(rawId).trim();
+          const nama = String(rawName).trim();
+          if (!nomorInduk || !nama) continue;
+
+          const prev = existingMap.get(nomorInduk);
+          parsedList.push({
+            nomor_induk: nomorInduk,
+            nama,
+            nip: String(row['NIP'] || row['Nip'] || '').trim() || undefined,
+            jabatan: String(row['JABATAN'] || row['Jabatan'] || '').trim() || undefined,
+            pangkat_golongan: String(row['PANGKAT'] || row['Golongan'] || row['PANGKAT / GOL'] || '').trim() || undefined,
+            unit_kerja: String(row['UNIT KERJA'] || row['Unit Kerja'] || '').trim() || undefined,
+            instansi: String(row['INSTANSI'] || row['Instansi'] || '').trim() || undefined,
+            hasPhoto: prev ? prev.hasPhoto : false,
+            photoFileName: prev ? prev.photoFileName : undefined,
+            photoUrl: prev ? prev.photoUrl : undefined,
+            faceDescriptor: prev ? prev.faceDescriptor : undefined,
+            photoStatus: prev ? prev.photoStatus : 'no_photo',
+            updatedAt: Date.now(),
+          });
+        }
+
+        if (parsedList.length > 0) {
+          saveServerEmployees(parsedList);
+          const status = getServerStatus();
+          res.json({
+            success: true,
+            message: `Berhasil memproses ${parsedList.length} data pegawai dari Excel di server.`,
+            employeeCount: parsedList.length,
+            version: status.version,
+          });
+          return;
+        }
+      }
+    }
+
+    res.status(400).json({ error: 'Tidak ada data pegawai yang valid ditemukan di file Excel.' });
+  } catch (err: unknown) {
+    console.error('Error uploading excel:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memproses file Excel di server.' });
+  }
+});
+
+// Admin: Upload Photos (Batch base64 or multipart)
+app.post('/api/admin/upload-photos', requireAdmin, upload.array('photos', 500), (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { photos } = req.body || {};
+    let processedCount = 0;
+    const newEmbeddings: Record<string, number[]> = {};
+
+    // 1. If sent as JSON batch { photos: [{ nomorInduk, base64, descriptor, fileName }] }
+    if (Array.isArray(photos)) {
+      for (const item of photos) {
+        if (!item.nomorInduk) continue;
+        const nomorInduk = String(item.nomorInduk).trim();
+
+        if (item.base64) {
+          const cleanB64 = item.base64.replace(/^data:image\/\w+;base64,/, '');
+          const buf = Buffer.from(cleanB64, 'base64');
+          savePhotoFile(nomorInduk, buf, 'jpg');
+          processedCount++;
+        }
+
+        if (Array.isArray(item.descriptor) && item.descriptor.length > 0) {
+          newEmbeddings[nomorInduk] = item.descriptor;
+        }
+      }
+    }
+
+    // 2. If sent as multipart files
+    const files = req.files as Express.Multer.File[];
+    if (files && Array.isArray(files)) {
+      for (const file of files) {
+        const baseName = path.basename(file.originalname, path.extname(file.originalname));
+        const ext = (path.extname(file.originalname).replace('.', '') || 'jpg').toLowerCase();
+        savePhotoFile(baseName, file.buffer, ext);
+        processedCount++;
+      }
+    }
+
+    if (Object.keys(newEmbeddings).length > 0) {
+      saveEmbeddings(newEmbeddings);
+    }
+
+    // Update photoStatus for employees in pegawai.json
+    const employees = getAllServerEmployees();
+    let empUpdated = false;
+    for (const emp of employees) {
+      const hasPhotoFile = Boolean(getPhotoFilePath(emp.nomor_induk));
+      if (hasPhotoFile && (!emp.hasPhoto || emp.photoStatus === 'no_photo')) {
+        emp.hasPhoto = true;
+        emp.photoFileName = `${emp.nomor_induk}.jpg`;
+        emp.photoStatus = 'ready';
+        empUpdated = true;
+      }
+    }
+    if (empUpdated) {
+      saveServerEmployees(employees);
+    }
+
+    const status = getServerStatus();
+    res.json({
+      success: true,
+      message: `Berhasil menyimpan ${processedCount} foto ke storage server.`,
+      processedCount,
+      version: status.version,
+    });
+  } catch (err: unknown) {
+    console.error('Error uploading photos:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menyimpan foto ke server.' });
+  }
+});
+
+// Admin: Save Embeddings batch
+app.post('/api/admin/save-embeddings', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { embeddings } = req.body || {};
+    if (!embeddings || typeof embeddings !== 'object') {
+      res.status(400).json({ error: 'Format embeddings tidak valid.' });
+      return;
+    }
+
+    saveEmbeddings(embeddings);
+    const status = getServerStatus();
+    res.json({
+      success: true,
+      message: `Berhasil memperbarui ${Object.keys(embeddings).length} face embedding di server.`,
+      embeddingCount: status.embeddingCount,
+      version: status.version,
+    });
+  } catch (err: unknown) {
+    console.error('Error saving embeddings:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menyimpan face embedding.' });
+  }
+});
+
+// Admin: Sync All to Server (Migration of existing client data to server master storage)
+app.post('/api/admin/sync-all-to-server', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { employees, embeddings, settings, logs, photos } = req.body || {};
+
+    if (Array.isArray(employees) && employees.length > 0) {
+      saveServerEmployees(employees);
+    }
+
+    if (embeddings && typeof embeddings === 'object') {
+      saveEmbeddings(embeddings);
+    }
+
+    if (settings && typeof settings === 'object') {
+      saveServerSettings(settings);
+    }
+
+    if (Array.isArray(logs) && logs.length > 0) {
+      for (const item of logs.slice().reverse()) {
+        appendServerLog(item);
+      }
+    }
+
+    if (photos && typeof photos === 'object') {
+      for (const [nomorInduk, b64] of Object.entries(photos)) {
+        if (typeof b64 === 'string') {
+          const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+          const buf = Buffer.from(cleanB64, 'base64');
+          savePhotoFile(nomorInduk, buf, 'jpg');
+        }
+      }
+    }
+
+    const status = getServerStatus();
+    res.json({
+      success: true,
+      message: 'Seluruh database lokal berhasil disinkronkan & disimpan permanen ke server master!',
+      status,
+    });
+  } catch (err: unknown) {
+    console.error('Error syncing all to server:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal sinkronisasi data ke server.' });
+  }
+});
+
+// Admin: Rebuild embeddings / metadata check
 app.post('/api/admin/rebuild-embeddings', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, message: 'Embedding rebuild authorized for admin.' });
+  try {
+    const status = getServerStatus();
+    res.json({
+      success: true,
+      message: 'Status embedding server diverifikasi.',
+      status,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memverifikasi embedding.' });
+  }
 });
 
+// Admin: Create persistent database backup
+app.post('/api/admin/backup', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const backup = createBackup();
+    res.json({
+      success: true,
+      message: `Backup ${backup.fileName} berhasil dibuat di server.`,
+      backup,
+    });
+  } catch (err: unknown) {
+    console.error('Error creating backup:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal membuat backup database.' });
+  }
+});
+
+// Admin: List all backups
+app.get('/api/admin/backups', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const backups = listBackups();
+    res.json({ status: 'ok', backups });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal mengambil daftar backup.' });
+  }
+});
+
+// Admin: Restore database from backup
+app.post('/api/admin/restore', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { backupId } = req.body || {};
+    if (!backupId) {
+      res.status(400).json({ error: 'ID backup wajib dicantumkan.' });
+      return;
+    }
+
+    const restored = restoreBackup(backupId);
+    if (!restored) {
+      res.status(404).json({ error: 'Berkas backup tidak ditemukan atau gagal dibaca.' });
+      return;
+    }
+
+    const status = getServerStatus();
+    res.json({
+      success: true,
+      message: 'Database server berhasil dipulihkan dari backup.',
+      status,
+    });
+  } catch (err: unknown) {
+    console.error('Error restoring backup:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memulihkan backup database.' });
+  }
+});
+
+// Admin: Reset database
 app.delete('/api/admin/database', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ success: true, message: 'Database reset authorized for admin.' });
+  try {
+    resetServerDatabase();
+    res.json({ success: true, message: 'Database server berhasil direset.' });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal mereset database server.' });
+  }
 });
 
 // ==========================================

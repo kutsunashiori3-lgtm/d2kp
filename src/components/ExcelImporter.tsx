@@ -11,6 +11,7 @@ import {
   ParseExcelResult,
 } from '../services/excelParser';
 import { saveEmployees, getAllEmployees } from '../services/database';
+import { uploadExcelToServer } from '../services/serverDbService';
 import {
   FileSpreadsheet,
   Upload,
@@ -114,9 +115,17 @@ export const ExcelImporter: React.FC<ExcelImporterProps> = ({ onSuccess }) => {
 
       await saveEmployees(employees);
 
+      // Save to Master Server storage permanently
+      let serverSaved = false;
+      if (selectedFile) {
+        const sRes = await uploadExcelToServer(selectedFile, employees);
+        serverSaved = sRes.success;
+      }
+
       setSuccessInfo(
         `Berhasil mengimpor ${employees.length} data pegawai ke database!` +
-          (skippedCount > 0 ? ` (${skippedCount} baris kosong dilewati).` : '')
+          (skippedCount > 0 ? ` (${skippedCount} baris kosong dilewati).` : '') +
+          (serverSaved ? ' Data tersimpan permanen di Master Server.' : '')
       );
 
       onSuccess(employees.length);

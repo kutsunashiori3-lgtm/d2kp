@@ -12,9 +12,16 @@ import {
   DEFAULT_SETTINGS,
 } from './services/database';
 import { checkAuthStatus, logoutUser, AuthUser } from './services/authService';
+import { ServerDatabaseStatus } from './types';
+import {
+  fetchServerStatus,
+  syncClientWithServerMaster,
+  syncAllDataToServer,
+} from './services/serverDbService';
 import { LoginPage } from './components/LoginPage';
 import { Dashboard } from './pages/Dashboard';
 import { CameraView } from './components/CameraView';
+import { ServerDatabasePanel } from './components/ServerDatabasePanel';
 import { ExcelImporter } from './components/ExcelImporter';
 import { FolderImporter } from './components/FolderImporter';
 import { DatabaseTable } from './components/DatabaseTable';
@@ -24,6 +31,7 @@ import { Settings } from './components/Settings';
 import {
   LayoutDashboard,
   Camera,
+  Server,
   FileSpreadsheet,
   FolderOpen,
   Users,
@@ -39,6 +47,7 @@ import {
 type TabType =
   | 'dashboard'
   | 'camera'
+  | 'server_db'
   | 'import_excel'
   | 'import_folder'
   | 'validation'
@@ -49,6 +58,7 @@ type TabType =
 const VALID_TABS: TabType[] = [
   'dashboard',
   'camera',
+  'server_db',
   'import_excel',
   'import_folder',
   'validation',
@@ -77,13 +87,29 @@ export default function App() {
   });
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [recentLogs, setRecentLogs] = useState<RecognitionLog[]>([]);
+  const [serverStatus, setServerStatus] = useState<ServerDatabaseStatus | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Load all data from IndexedDB
+  // Load all data from IndexedDB & Master Server
   const refreshAllData = useCallback(async () => {
     try {
-      const [empList, dbStats, appSettings, logs] = await Promise.all([
-        getAllEmployees(),
+      // 1. Fetch server status
+      const sStatus = await fetchServerStatus();
+      setServerStatus(sStatus);
+
+      // 2. Fetch local IndexedDB
+      let empList = await getAllEmployees();
+
+      // If local is empty but server has employees, auto-sync from Master Server
+      if (empList.length === 0 && sStatus && sStatus.ready && sStatus.employeeCount > 0) {
+        console.log('[AUTO-SYNC] Server has employees, pulling to local cache...');
+        const syncRes = await syncClientWithServerMaster();
+        if (syncRes.synced) {
+          empList = await getAllEmployees();
+        }
+      }
+
+      const [dbStats, appSettings, logs] = await Promise.all([
         calculateDatabaseStats(),
         getStoredSettings(),
         getAllLogs(),
@@ -94,7 +120,7 @@ export default function App() {
       setSettings(appSettings);
       setRecentLogs(logs.slice(0, 10));
     } catch (err) {
-      console.error('Failed to load local database:', err);
+      console.error('Failed to load database:', err);
     } finally {
       setIsLoading(false);
     }
@@ -254,15 +280,22 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right: Embedding Badge, User Info & Logout */}
+            {/* Right: Server Status, Embedding Badge, User Info & Logout */}
             <div className="flex items-center gap-3">
+              {/* Server Online Badge */}
+              <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-semibold text-indigo-900">
+                <Server className="w-3.5 h-3.5 text-indigo-600" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Server Master</span>
+              </div>
+
               {/* Privacy & Embedding Status Pills */}
               <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs font-semibold text-emerald-800">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span>{stats.embeddingReady} Wajah Siap</span>
               </div>
 
-              {/* User Account Details (Item 12: 👤 arik Administrator [Logout]) */}
+              {/* User Account Details */}
               <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-3 border-l border-slate-200">
                 <div className="text-right hidden sm:block">
                   <div className="text-xs font-bold text-slate-900 flex items-center justify-end gap-1">
@@ -319,6 +352,20 @@ export default function App() {
             {/* Admin Only Tabs */}
             {authUser.role === 'admin' && (
               <>
+                <button
+                  type="button"
+                  onClick={() => navigateToTab('server_db')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                    activeTab === 'server_db'
+                      ? 'bg-blue-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <Server className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Database Server</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </button>
+
                 <button
                   type="button"
                   onClick={() => navigateToTab('import_excel')}
@@ -415,8 +462,17 @@ export default function App() {
                 stats={stats}
                 employees={employees}
                 recentLogs={recentLogs}
+                serverStatus={serverStatus}
+                currentUser={authUser}
                 onNavigate={(t) => navigateToTab(t)}
                 onRefreshData={refreshAllData}
+              />
+            )}
+
+            {activeTab === 'server_db' && authUser.role === 'admin' && (
+              <ServerDatabasePanel
+                onNavigateTab={(t) => navigateToTab(t)}
+                onDataUpdated={refreshAllData}
               />
             )}
 

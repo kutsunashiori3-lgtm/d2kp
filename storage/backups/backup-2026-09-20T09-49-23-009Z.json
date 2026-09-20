@@ -1,0 +1,86 @@
+{
+  "backupId": "bkp_1789897763009",
+  "createdAt": 1789897763009,
+  "metadata": {
+    "version": 1,
+    "ready": true,
+    "employeeCount": 5,
+    "photoCount": 5,
+    "embeddingCount": 5,
+    "excelFileName": "pegawai.xlsx",
+    "lastUpdated": "2026-09-20T09:48:57.299Z",
+    "storageReady": true,
+    "storagePath": "/app/applet/storage"
+  },
+  "employees": [
+    {
+      "nomor_induk": "198701012010011001",
+      "nama": "Ahmad Fauzi, S.Kom",
+      "nip": "198701012010011001",
+      "jabatan": "Analis Kepegawaian Ahli Muda",
+      "pangkat_golongan": "III/c - Penata",
+      "unit_kerja": "BKPSDM",
+      "instansi": "Pemerintah Kabupaten",
+      "hasPhoto": true,
+      "photoFileName": "198701012010011001.jpg",
+      "photoStatus": "ready",
+      "updatedAt": 1789897737288
+    },
+    {
+      "nomor_induk": "198802152011021002",
+      "nama": "Budi Santoso, S.E.",
+      "nip": "198802152011021002",
+      "jabatan": "Pengadministrasi Keuangan",
+      "pangkat_golongan": "III/b - Penata Muda Tk. I",
+      "unit_kerja": "BKAD",
+      "instansi": "Pemerintah Kabupaten",
+      "hasPhoto": true,
+      "photoFileName": "198802152011021002.jpg",
+      "photoStatus": "ready",
+      "updatedAt": 1789897737288
+    },
+    {
+      "nomor_induk": "199003102012032003",
+      "nama": "Siti Nurhaliza, M.Pd",
+      "nip": "199003102012032003",
+      "jabatan": "Pranata Komputer Ahli Muda",
+      "pangkat_golongan": "III/d - Penata Tk. I",
+      "unit_kerja": "Dinas Komunikasi dan Informatika",
+      "instansi": "Pemerintah Kabupaten",
+      "hasPhoto": true,
+      "photoFileName": "199003102012032003.jpg",
+      "photoStatus": "ready",
+      "updatedAt": 1789897737288
+    },
+    {
+      "nomor_induk": "199105202013041004",
+      "nama": "Dedi Kusuma, S.Sos",
+      "nip": "199105202013041004",
+      "jabatan": "Pengelola Data Informasi",
+      "pangkat_golongan": "III/a - Penata Muda",
+      "unit_kerja": "Inspektorat Daerah",
+      "instansi": "Pemerintah Kabupaten",
+      "hasPhoto": true,
+      "photoFileName": "199105202013041004.jpg",
+      "photoStatus": "ready",
+      "updatedAt": 1789897737288
+    },
+    {
+      "nomor_induk": "199308142014022005",
+      "nama": "Rina Wulandari, S.H.",
+      "nip": "199308142014022005",
+      "jabatan": "Analis Hukum & Tata Laksana",
+      "pangkat_golongan": "III/b - Penata Muda Tk. I",
+      "unit_kerja": "Sekretariat Daerah",
+      "instansi": "Pemerintah Kabupaten",
+      "hasPhoto": true,
+      "photoFileName": "199308142014022005.jpg",
+      "photoStatus": "ready",
+      "updatedAt": 1789897737288
+    }
+  ],
+  "embeddings": {},
+  "settings": {},
+  "logs": [],
+  "photos": {}
+}

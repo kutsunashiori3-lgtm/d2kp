@@ -11,6 +11,7 @@ import { extractIdFromFilename } from '../utils/normalizeEmployeeId';
 import { fileToImage } from '../services/imageProcessor';
 import { processEmployeePhoto } from '../services/faceRecognition';
 import { getAllEmployees, saveEmployees } from '../services/database';
+import { uploadPhotosToServer } from '../services/serverDbService';
 import {
   FolderOpen,
   Image as ImageIcon,
@@ -175,6 +176,24 @@ export const FolderImporter: React.FC<FolderImporterProps> = ({ onSuccess }) => 
 
     // Save all updated employees to IndexedDB
     await saveEmployees(updatedEmployees);
+
+    // Save photos and embeddings to Master Server storage
+    try {
+      const photosToUpload = updatedEmployees
+        .filter((emp) => emp.hasPhoto && emp.photoUrl)
+        .map((emp) => ({
+          nomorInduk: emp.nomor_induk,
+          fileName: emp.photoFileName || `${emp.nomor_induk}.jpg`,
+          base64: emp.photoUrl,
+          descriptor: emp.faceDescriptor,
+        }));
+
+      if (photosToUpload.length > 0) {
+        await uploadPhotosToServer(photosToUpload);
+      }
+    } catch (sErr) {
+      console.warn('Failed to upload photos to master server:', sErr);
+    }
 
     setLogs(localLogs);
     setSummary({
