@@ -141,6 +141,33 @@ export function extractEmployeesFromRawRows(
     // Check if employee already exists in existing map (e.g. from photo import)
     const existing = existingEmployeesMap.get(nomor_induk);
 
+    // Collect all dynamic/extra columns from the Excel row
+    const mappedHeaderKeys = new Set(
+      [
+        mapping.nomor_induk,
+        mapping.nama,
+        mapping.nip,
+        mapping.jabatan,
+        mapping.pangkat_golongan,
+        mapping.unit_kerja,
+        mapping.instansi,
+      ].filter(Boolean)
+    );
+
+    const extraFields: Record<string, string> = { ...(existing?.extraFields || {}) };
+    for (const [key, val] of Object.entries(row)) {
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey || mappedHeaderKeys.has(cleanKey) || cleanKey.startsWith('__EMPTY')) {
+        continue;
+      }
+      if (val !== undefined && val !== null) {
+        const valStr = String(val).trim();
+        if (valStr && valStr !== 'undefined' && valStr !== 'null' && valStr !== 'NaN') {
+          extraFields[cleanKey] = valStr;
+        }
+      }
+    }
+
     const emp: Employee = {
       nomor_induk,
       nama: rawNama || existing?.nama || `Pegawai ${nomor_induk}`,
@@ -155,7 +182,7 @@ export function extractEmployeesFromRawRows(
       faceDescriptor: existing?.faceDescriptor,
       photoStatus: existing?.photoStatus ?? 'no_photo',
       photoError: existing?.photoError,
-      extraFields: {},
+      extraFields,
       updatedAt: Date.now(),
     };
 
@@ -172,48 +199,88 @@ export function generateSampleExcelFile(): void {
   const sampleData = [
     {
       'Nomor Induk': '198701012010011001',
-      'Nama': 'Ahmad Fauzi, S.Kom',
       'NIP': '198701012010011001',
-      'Pangkat/Golongan': 'III/c - Penata',
-      'Jabatan': 'Analis Kepegawaian Muda',
+      'Nama': 'Ahmad Fauzi, S.Kom',
+      'Tempat Lahir': 'Putussibau',
+      'Tanggal Lahir': '01 Januari 1987',
+      'Jenis Kelamin': 'Laki-laki',
+      'Pangkat/Golongan': 'III/c',
+      'Jabatan': 'Analis Kepegawaian',
       'Unit Kerja': 'BKPSDM',
       'Instansi': 'Pemerintah Kabupaten',
+      'Pendidikan': 'S-1',
+      'Status Kepegawaian': 'PNS',
+      'Email': 'ahmad.fauzi@pemkab.go.id',
+      'Nomor HP': '081234567890',
+      'Alamat': 'Jl. Diponegoro No. 14, Putussibau',
     },
     {
       'Nomor Induk': '198802152011021002',
-      'Nama': 'Budi Santoso, S.E.',
       'NIP': '198802152011021002',
-      'Pangkat/Golongan': 'III/b - Penata Muda Tk. I',
+      'Nama': 'Budi Santoso, S.E.',
+      'Tempat Lahir': 'Pontianak',
+      'Tanggal Lahir': '15 Februari 1988',
+      'Jenis Kelamin': 'Laki-laki',
+      'Pangkat/Golongan': 'III/b',
       'Jabatan': 'Pengadministrasi Keuangan',
       'Unit Kerja': 'BKAD',
       'Instansi': 'Pemerintah Kabupaten',
+      'Pendidikan': 'S-1',
+      'Status Kepegawaian': 'PNS',
+      'Email': 'budi.santoso@pemkab.go.id',
+      'Nomor HP': '081298765432',
+      'Alamat': 'Jl. Gajah Mada No. 22',
     },
     {
       'Nomor Induk': '199003102012032003',
-      'Nama': 'Siti Nurhaliza, M.Pd',
       'NIP': '199003102012032003',
-      'Pangkat/Golongan': 'III/d - Penata Tk. I',
+      'Nama': 'Siti Nurhaliza, M.Pd',
+      'Tempat Lahir': 'Sintang',
+      'Tanggal Lahir': '10 Maret 1990',
+      'Jenis Kelamin': 'Perempuan',
+      'Pangkat/Golongan': 'III/d',
       'Jabatan': 'Pranata Komputer Ahli Muda',
       'Unit Kerja': 'Dinas Komunikasi dan Informatika',
       'Instansi': 'Pemerintah Kabupaten',
+      'Pendidikan': 'S-2',
+      'Status Kepegawaian': 'PNS',
+      'Email': 'siti.nurhaliza@pemkab.go.id',
+      'Nomor HP': '081345678901',
+      'Alamat': 'Jl. Ahmad Yani No. 5',
     },
     {
       'Nomor Induk': '199105202013041004',
-      'Nama': 'Dedi Kusuma, S.Sos',
       'NIP': '199105202013041004',
-      'Pangkat/Golongan': 'III/a - Penata Muda',
+      'Nama': 'Dedi Kusuma, S.Sos',
+      'Tempat Lahir': 'Ketapang',
+      'Tanggal Lahir': '20 Mei 1991',
+      'Jenis Kelamin': 'Laki-laki',
+      'Pangkat/Golongan': 'III/a',
       'Jabatan': 'Pengelola Data Informasi',
       'Unit Kerja': 'Inspektorat Daerah',
       'Instansi': 'Pemerintah Kabupaten',
+      'Pendidikan': 'S-1',
+      'Status Kepegawaian': 'PNS',
+      'Email': 'dedi.kusuma@pemkab.go.id',
+      'Nomor HP': '081567890123',
+      'Alamat': 'Jl. Merdeka No. 8',
     },
     {
       'Nomor Induk': '199308142014022005',
-      'Nama': 'Rina Wulandari, S.H.',
       'NIP': '199308142014022005',
-      'Pangkat/Golongan': 'III/b - Penata Muda Tk. I',
+      'Nama': 'Rina Wulandari, S.H.',
+      'Tempat Lahir': 'Singkawang',
+      'Tanggal Lahir': '14 Agustus 1993',
+      'Jenis Kelamin': 'Perempuan',
+      'Pangkat/Golongan': 'III/b',
       'Jabatan': 'Analis Hukum & Tata Laksana',
       'Unit Kerja': 'Sekretariat Daerah',
       'Instansi': 'Pemerintah Kabupaten',
+      'Pendidikan': 'S-1',
+      'Status Kepegawaian': 'PNS',
+      'Email': 'rina.wulandari@pemkab.go.id',
+      'Nomor HP': '081789012345',
+      'Alamat': 'Jl. Pahlawan No. 12',
     },
   ];
 
@@ -232,6 +299,7 @@ export function exportLogsToExcel(logs: RecognitionLog[]): void {
     'No': i + 1,
     'Tanggal': log.dateStr,
     'Waktu': log.timeStr,
+    'Jenis Identifikasi': log.sourceType || 'Realtime Camera',
     'Nomor Induk': log.nomor_induk,
     'Nama': log.nama,
     'NIP': log.nip || log.nomor_induk,

@@ -21,6 +21,7 @@ import {
 import { LoginPage } from './components/LoginPage';
 import { Dashboard } from './pages/Dashboard';
 import { CameraView } from './components/CameraView';
+import { PhotoIdentification } from './components/PhotoIdentification';
 import { ServerDatabasePanel } from './components/ServerDatabasePanel';
 import { ExcelImporter } from './components/ExcelImporter';
 import { FolderImporter } from './components/FolderImporter';
@@ -31,6 +32,7 @@ import { Settings } from './components/Settings';
 import {
   LayoutDashboard,
   Camera,
+  FileImage,
   Server,
   FileSpreadsheet,
   FolderOpen,
@@ -47,6 +49,7 @@ import {
 type TabType =
   | 'dashboard'
   | 'camera'
+  | 'photo_identification'
   | 'server_db'
   | 'import_excel'
   | 'import_folder'
@@ -58,6 +61,7 @@ type TabType =
 const VALID_TABS: TabType[] = [
   'dashboard',
   'camera',
+  'photo_identification',
   'server_db',
   'import_excel',
   'import_folder',
@@ -339,14 +343,27 @@ export default function App() {
             <button
               type="button"
               onClick={() => navigateToTab('camera')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
                 activeTab === 'camera'
                   ? 'bg-blue-900 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>Kamera</span>
+              <span>Kamera Real-Time</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigateToTab('photo_identification')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'photo_identification'
+                  ? 'bg-blue-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <FileImage className="w-3.5 h-3.5 text-blue-400" />
+              <span>Identifikasi Foto</span>
             </button>
 
             {/* Admin Only Tabs */}
@@ -481,6 +498,14 @@ export default function App() {
                 employees={employees}
                 settings={settings}
                 onNavigateToImport={() => navigateToTab('import_folder')}
+              />
+            )}
+
+            {activeTab === 'photo_identification' && (
+              <PhotoIdentification
+                employees={employees}
+                settings={settings}
+                onNavigateToHistory={() => navigateToTab('history')}
               />
             )}
 

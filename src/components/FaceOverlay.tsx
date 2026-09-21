@@ -39,7 +39,7 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
     if (faces.length === 0) return;
 
     // Draw each detected face
-    faces.forEach((face) => {
+    faces.forEach((face, index) => {
       const { box, isRecognized, employee, confidence = 0, isConfirmed, consecutiveMatches = 0 } = face;
 
       let x = box.x;
@@ -52,21 +52,28 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
         x = canvas.width - x - w;
       }
 
+      const prefix = faces.length > 1 ? `[Wajah ${index + 1}] ` : '';
+
       // Determine colors and label
       let strokeColor = '#ef4444'; // Red for unknown
-      let bgColor = 'rgba(239, 68, 68, 0.9)';
-      let label = 'Wajah Belum Dikenali';
+      let bgColor = 'rgba(239, 68, 68, 0.92)';
+      let label = `${prefix}Wajah Belum Dikenali`;
 
       if (isRecognized && employee) {
         if (isConfirmed) {
           strokeColor = '#10b981'; // Green for verified
-          bgColor = 'rgba(16, 185, 129, 0.92)';
-          label = `${employee.nama} (${confidence}%)`;
+          bgColor = 'rgba(16, 185, 129, 0.95)';
+          const confStr = typeof confidence === 'number' ? confidence.toFixed(1).replace('.', ',') : '0';
+          label = `${prefix}${employee.nama} (${confStr}%)`;
         } else {
           strokeColor = '#f59e0b'; // Amber for verifying
           bgColor = 'rgba(245, 158, 11, 0.92)';
-          label = `Memverifikasi (${consecutiveMatches}/3)...`;
+          label = `${prefix}Memverifikasi (${consecutiveMatches}/3)...`;
         }
+      } else if (confidence > 35 && confidence < 75) {
+        strokeColor = '#f59e0b';
+        bgColor = 'rgba(245, 158, 11, 0.92)';
+        label = `${prefix}Kecocokan Tidak Cukup (${confidence.toFixed(1).replace('.', ',')}%)`;
       }
 
       // 1. Draw corner brackets around face (modern tech/enterprise style)

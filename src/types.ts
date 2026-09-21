@@ -56,6 +56,7 @@ export interface RecognitionLog {
   distance: number; // Euclidean distance (0.0 - 1.0+)
   status: 'Recognized' | 'Unrecognized';
   photoUrl?: string;
+  sourceType?: 'Realtime Camera' | 'Manual Photo';
 }
 
 export interface DatabaseStats {

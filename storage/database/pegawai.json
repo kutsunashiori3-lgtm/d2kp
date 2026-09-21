@@ -1,0 +1,117 @@
+[
+  {
+    "nomor_induk": "198701012010011001",
+    "nama": "Ahmad Fauzi, S.Kom",
+    "nip": "198701012010011001",
+    "jabatan": "Analis Kepegawaian",
+    "pangkat_golongan": "III/c",
+    "unit_kerja": "BKPSDM",
+    "instansi": "Pemerintah Kabupaten",
+    "extraFields": {
+      "Tempat Lahir": "Putussibau",
+      "Tanggal Lahir": "01 Januari 1987",
+      "Jenis Kelamin": "Laki-laki",
+      "Pendidikan": "S-1",
+      "Status Kepegawaian": "PNS",
+      "Email": "ahmad.fauzi@pemkab.go.id",
+      "Nomor HP": "081234567890",
+      "Alamat": "Jl. Diponegoro No. 14, Putussibau"
+    },
+    "hasPhoto": true,
+    "photoFileName": "198701012010011001.jpg",
+    "photoStatus": "ready",
+    "updatedAt": 1789953415937
+  },
+  {
+    "nomor_induk": "198802152011021002",
+    "nama": "Budi Santoso, S.E.",
+    "nip": "198802152011021002",
+    "jabatan": "Pengadministrasi Keuangan",
+    "pangkat_golongan": "III/b",
+    "unit_kerja": "BKAD",
+    "instansi": "Pemerintah Kabupaten",
+    "extraFields": {
+      "Tempat Lahir": "Pontianak",
+      "Tanggal Lahir": "15 Februari 1988",
+      "Jenis Kelamin": "Laki-laki",
+      "Pendidikan": "S-1",
+      "Status Kepegawaian": "PNS",
+      "Email": "budi.santoso@pemkab.go.id",
+      "Nomor HP": "081298765432",
+      "Alamat": "Jl. Gajah Mada No. 22"
+    },
+    "hasPhoto": true,
+    "photoFileName": "198802152011021002.jpg",
+    "photoStatus": "ready",
+    "updatedAt": 1789953415937
+  },
+  {
+    "nomor_induk": "199003102012032003",
+    "nama": "Siti Nurhaliza, M.Pd",
+    "nip": "199003102012032003",
+    "jabatan": "Pranata Komputer Ahli Muda",
+    "pangkat_golongan": "III/d",
+    "unit_kerja": "Dinas Komunikasi dan Informatika",
+    "instansi": "Pemerintah Kabupaten",
+    "extraFields": {
+      "Tempat Lahir": "Sintang",
+      "Tanggal Lahir": "10 Maret 1990",
+      "Jenis Kelamin": "Perempuan",
+      "Pendidikan": "S-2",
+      "Status Kepegawaian": "PNS",
+      "Email": "siti.nurhaliza@pemkab.go.id",
+      "Nomor HP": "081345678901",
+      "Alamat": "Jl. Ahmad Yani No. 5"
+    },
+    "hasPhoto": true,
+    "photoFileName": "199003102012032003.jpg",
+    "photoStatus": "ready",
+    "updatedAt": 1789953415937
+  },
+  {
+    "nomor_induk": "199105202013041004",
+    "nama": "Dedi Kusuma, S.Sos",
+    "nip": "199105202013041004",
+    "jabatan": "Pengelola Data Informasi",
+    "pangkat_golongan": "III/a",
+    "unit_kerja": "Inspektorat Daerah",
+    "instansi": "Pemerintah Kabupaten",
+    "extraFields": {
+      "Tempat Lahir": "Ketapang",
+      "Tanggal Lahir": "20 Mei 1991",
+      "Jenis Kelamin": "Laki-laki",
+      "Pendidikan": "S-1",
+      "Status Kepegawaian": "PNS",
+      "Email": "dedi.kusuma@pemkab.go.id",
+      "Nomor HP": "081567890123",
+      "Alamat": "Jl. Merdeka No. 8"
+    },
+    "hasPhoto": true,
+    "photoFileName": "199105202013041004.jpg",
+    "photoStatus": "ready",
+    "updatedAt": 1789953415937
+  },
+  {
+    "nomor_induk": "199308142014022005",
+    "nama": "Rina Wulandari, S.H.",
+    "nip": "199308142014022005",
+    "jabatan": "Analis Hukum & Tata Laksana",
+    "pangkat_golongan": "III/b",
+    "unit_kerja": "Sekretariat Daerah",
+    "instansi": "Pemerintah Kabupaten",
+    "extraFields": {
+      "Tempat Lahir": "Singkawang",
+      "Tanggal Lahir": "14 Agustus 1993",
+      "Jenis Kelamin": "Perempuan",
+      "Pendidikan": "S-1",
+      "Status Kepegawaian": "PNS",
+      "Email": "rina.wulandari@pemkab.go.id",
+      "Nomor HP": "081789012345",
+      "Alamat": "Jl. Pahlawan No. 12"
+    },
+    "hasPhoto": true,
+    "photoFileName": "199308142014022005.jpg",
+    "photoStatus": "ready",
+    "updatedAt": 1789953415937
+  }
+]

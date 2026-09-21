@@ -352,3 +352,183 @@ export function playRecognitionChime(): void {
     console.debug('Audio chime playback omitted:', e);
   }
 }
+
+export interface ImageFaceRecognitionResult {
+  faceIndex: number;
+  box: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  detectionScore: number;
+  descriptor: Float32Array;
+  employee?: Employee;
+  bestCandidate?: {
+    employee: Employee;
+    confidence: number;
+    distance: number;
+  };
+  confidence: number;
+  distance: number;
+  isRecognized: boolean;
+  croppedFaceUrl?: string;
+  qualityIssues: string[];
+}
+
+/**
+ * Identify all faces from a static image or canvas.
+ * Utilizes the exact same face recognition models & master server embeddings.
+ */
+export async function identifyFacesInImage(
+  imageOrCanvas: HTMLImageElement | HTMLCanvasElement,
+  employees: Employee[],
+  threshold = 0.50
+): Promise<{
+  faces: ImageFaceRecognitionResult[];
+  imageWidth: number;
+  imageHeight: number;
+  noFaceDetected: boolean;
+  totalFaces: number;
+}> {
+  if (!modelsLoaded) {
+    await loadFaceModels();
+  }
+
+  // Determine width & height
+  const width = 'naturalWidth' in imageOrCanvas ? imageOrCanvas.naturalWidth : imageOrCanvas.width;
+  const height = 'naturalHeight' in imageOrCanvas ? imageOrCanvas.naturalHeight : imageOrCanvas.height;
+
+  // Detect all faces using SSD Mobilenet V1
+  const detections = await faceapi
+    .detectAllFaces(imageOrCanvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
+    .withFaceLandmarks()
+    .withFaceDescriptors();
+
+  if (!detections || detections.length === 0) {
+    return {
+      faces: [],
+      imageWidth: width,
+      imageHeight: height,
+      noFaceDetected: true,
+      totalFaces: 0,
+    };
+  }
+
+  const validEmployees = employees.filter((e) => e.faceDescriptor && e.faceDescriptor.length === 128);
+
+  const results: ImageFaceRecognitionResult[] = [];
+
+  // Temporary canvas to crop face regions
+  const cropCanvas = document.createElement('canvas');
+  const cropCtx = cropCanvas.getContext('2d');
+
+  for (let idx = 0; idx < detections.length; idx++) {
+    const det = detections[idx];
+    const box = {
+      x: Math.max(0, Math.round(det.detection.box.x)),
+      y: Math.max(0, Math.round(det.detection.box.y)),
+      width: Math.round(det.detection.box.width),
+      height: Math.round(det.detection.box.height),
+    };
+
+    const qualityIssues: string[] = [];
+
+    // Check 1: Wajah terlalu kecil
+    if (box.width < 50 || box.height < 50) {
+      qualityIssues.push('Ukuran wajah terlalu kecil (< 50px)');
+    }
+
+    // Check 2: Confidence detektor rendah (indikasi foto buram / miring)
+    const detScore = det.detection.score;
+    if (detScore < 0.55) {
+      qualityIssues.push('Wajah kurang fokus / deteksi rendah');
+    }
+
+    // Crop face for display
+    let croppedFaceUrl: string | undefined = undefined;
+    if (cropCtx && width > 0 && height > 0) {
+      try {
+        const padX = Math.round(box.width * 0.15);
+        const padY = Math.round(box.height * 0.2);
+        const cropX = Math.max(0, box.x - padX);
+        const cropY = Math.max(0, box.y - padY);
+        const cropW = Math.min(width - cropX, box.width + padX * 2);
+        const cropH = Math.min(height - cropY, box.height + padY * 2);
+
+        cropCanvas.width = 160;
+        cropCanvas.height = 200;
+        cropCtx.clearRect(0, 0, 160, 200);
+        cropCtx.drawImage(imageOrCanvas, cropX, cropY, cropW, cropH, 0, 0, 160, 200);
+
+        // Check 3: Luminance / pencahayaan
+        try {
+          const imgData = cropCtx.getImageData(0, 0, 160, 200);
+          let totalLuminance = 0;
+          const pixelCount = imgData.data.length / 4;
+          for (let p = 0; p < imgData.data.length; p += 16) {
+            const r = imgData.data[p];
+            const g = imgData.data[p + 1];
+            const b = imgData.data[p + 2];
+            totalLuminance += 0.299 * r + 0.587 * g + 0.114 * b;
+          }
+          const avgLum = totalLuminance / (pixelCount / 4);
+          if (avgLum < 32) {
+            qualityIssues.push('Pencahayaan wajah terlalu gelap');
+          }
+        } catch {
+          // Ignore pixel inspection error
+        }
+
+        croppedFaceUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
+      } catch (cropErr) {
+        console.warn('Face crop generation skipped:', cropErr);
+      }
+    }
+
+    // Compare with Master Server database embeddings
+    const queryDescriptor = det.descriptor;
+    let bestEmployee: Employee | undefined = undefined;
+    let minDistance = Infinity;
+
+    for (const emp of validEmployees) {
+      if (!emp.faceDescriptor) continue;
+      const dist = euclideanDistance(queryDescriptor, emp.faceDescriptor);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestEmployee = emp;
+      }
+    }
+
+    const confidence = distanceToConfidence(minDistance);
+    const isRecognized = minDistance <= threshold && !!bestEmployee;
+
+    results.push({
+      faceIndex: idx,
+      box,
+      detectionScore: Math.round(detScore * 100) / 100,
+      descriptor: queryDescriptor,
+      employee: isRecognized ? bestEmployee : undefined,
+      bestCandidate: bestEmployee
+        ? {
+            employee: bestEmployee,
+            confidence,
+            distance: minDistance === Infinity ? 1.0 : Math.round(minDistance * 1000) / 1000,
+          }
+        : undefined,
+      confidence,
+      distance: minDistance === Infinity ? 1.0 : Math.round(minDistance * 1000) / 1000,
+      isRecognized,
+      croppedFaceUrl,
+      qualityIssues,
+    });
+  }
+
+  return {
+    faces: results,
+    imageWidth: width,
+    imageHeight: height,
+    noFaceDetected: false,
+    totalFaces: results.length,
+  };
+}

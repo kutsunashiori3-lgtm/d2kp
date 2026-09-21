@@ -10,6 +10,7 @@ import { saveEmployees } from '../services/database';
 import {
   Users,
   Camera,
+  FileImage,
   FolderOpen,
   FileSpreadsheet,
   ShieldCheck,
@@ -31,7 +32,7 @@ interface DashboardProps {
   recentLogs: RecognitionLog[];
   serverStatus?: ServerDatabaseStatus | null;
   currentUser?: AuthUser | null;
-  onNavigate: (tab: 'camera' | 'server_db' | 'import_excel' | 'import_folder' | 'validation' | 'database' | 'history' | 'settings') => void;
+  onNavigate: (tab: 'camera' | 'photo_identification' | 'server_db' | 'import_excel' | 'import_folder' | 'validation' | 'database' | 'history' | 'settings') => void;
   onRefreshData: () => void;
 }
 
@@ -88,6 +89,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <Camera className="w-4 h-4" />
               <span>Mulai Kamera</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('photo_identification')}
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2.5 transition-all transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <FileImage className="w-4 h-4" />
+              <span>Identifikasi Foto</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 

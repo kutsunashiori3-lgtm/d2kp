@@ -16,6 +16,8 @@ import {
   Building2,
   Clock,
   CheckCircle2,
+  Camera,
+  FileImage,
 } from 'lucide-react';
 
 export const RecognitionHistory: React.FC = () => {
@@ -201,6 +203,7 @@ export const RecognitionHistory: React.FC = () => {
             <tr>
               <th className="py-3 px-4 w-12 text-center">No</th>
               <th className="py-3 px-4">Tanggal & Jam</th>
+              <th className="py-3 px-4 text-center">Jenis</th>
               <th className="py-3 px-4 w-14">Foto</th>
               <th className="py-3 px-4">Nomor Induk</th>
               <th className="py-3 px-4">Nama Pegawai</th>
@@ -212,17 +215,17 @@ export const RecognitionHistory: React.FC = () => {
           <tbody className="divide-y divide-slate-100">
             {isLoading ? (
               <tr>
-                <td colSpan={8} className="py-10 text-center text-slate-400">
+                <td colSpan={9} className="py-10 text-center text-slate-400">
                   Memuat data riwayat...
                 </td>
               </tr>
             ) : filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-slate-400">
+                <td colSpan={9} className="py-12 text-center text-slate-400">
                   <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                   <p className="font-medium text-slate-600">Belum ada riwayat pengenalan wajah.</p>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Aktifkan kamera pada tab "Kamera" untuk memulai pengenalan pegawai.
+                    Gunakan tab "Kamera" atau "Identifikasi Foto" untuk mengenali identitas pegawai.
                   </p>
                 </td>
               </tr>
@@ -235,6 +238,19 @@ export const RecognitionHistory: React.FC = () => {
                   <td className="py-2.5 px-4 font-mono text-slate-700">
                     <div className="font-semibold">{log.timeStr}</div>
                     <div className="text-[11px] text-slate-400">{log.dateStr}</div>
+                  </td>
+                  <td className="py-2.5 px-4 text-center">
+                    {log.sourceType === 'Manual Photo' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-semibold text-[10px]">
+                        <FileImage className="w-3 h-3 text-blue-600" />
+                        Foto
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-md font-semibold text-[10px]">
+                        <Camera className="w-3 h-3 text-slate-600" />
+                        Kamera
+                      </span>
+                    )}
                   </td>
                   <td className="py-2.5 px-4">
                     <div className="w-9 h-9 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center">

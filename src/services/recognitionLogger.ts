@@ -58,6 +58,53 @@ class RecognitionLogger {
       distance,
       status: 'Recognized',
       photoUrl: employee.photoUrl,
+      sourceType: 'Realtime Camera',
+    };
+
+    await addRecognitionLog(log);
+
+    // Notify UI
+    this.onLogListeners.forEach(listener => {
+      try {
+        listener(log);
+      } catch (e) {
+        console.error('Error in log listener:', e);
+      }
+    });
+
+    return true;
+  }
+
+  public async logManualPhoto(
+    employee: Employee,
+    confidence: number,
+    distance: number
+  ): Promise<boolean> {
+    const now = Date.now();
+    const dateObj = new Date(now);
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    const hours = String(dateObj.getHours()).padStart(2, '0');
+    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+    const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+
+    const log: RecognitionLog = {
+      id: `photo_${now}_${employee.nomor_induk}`,
+      timestamp: now,
+      dateStr: `${day}-${month}-${year}`,
+      timeStr: `${hours}:${minutes}:${seconds}`,
+      nomor_induk: employee.nomor_induk,
+      nama: employee.nama,
+      nip: employee.nip,
+      jabatan: employee.jabatan,
+      unit_kerja: employee.unit_kerja || '-',
+      instansi: employee.instansi || '-',
+      confidence,
+      distance,
+      status: 'Recognized',
+      photoUrl: employee.photoUrl,
+      sourceType: 'Manual Photo',
     };
 
     await addRecognitionLog(log);

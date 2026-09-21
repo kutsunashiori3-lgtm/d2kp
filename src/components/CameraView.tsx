@@ -13,7 +13,7 @@ import {
 } from '../services/faceRecognition';
 import { recognitionLogger } from '../services/recognitionLogger';
 import { FaceOverlay } from './FaceOverlay';
-import { EmployeeCard } from './EmployeeCard';
+import { EmployeeCard, IdentificationStatusType } from './EmployeeCard';
 import {
   Camera,
   CameraOff,
@@ -29,6 +29,7 @@ import {
   Users,
   CheckCircle2,
   Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface CameraViewProps {
@@ -313,16 +314,27 @@ export const CameraView: React.FC<CameraViewProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  // Selected face tab when multi-face is detected ('all' or face index)
+  const [selectedFaceIndex, setSelectedFaceIndex] = useState<number | 'all'>(0);
+
+  // Helper to map detected face result to status type
+  const getFaceStatus = (face: DetectedFaceResult | undefined): IdentificationStatusType => {
+    if (!face) return 'no_face';
+    if (face.isRecognized && face.employee) {
+      return face.isConfirmed ? 'verified' : 'identifying';
+    }
+    if (face.confidence && face.confidence > 35 && face.confidence < 70) {
+      return 'low_confidence';
+    }
+    return 'unknown';
+  };
+
   // Primary recognized employee (if any)
   const primaryFace = detectedFaces[0];
-  const primaryStatus =
-    detectedFaces.length === 0
-      ? 'no_face'
-      : primaryFace?.isRecognized
-      ? primaryFace.isConfirmed
-        ? 'recognized'
-        : 'verifying'
-      : 'unrecognized';
+  const activeSelectedFace =
+    typeof selectedFaceIndex === 'number'
+      ? detectedFaces[selectedFaceIndex] || primaryFace
+      : primaryFace;
 
   const readyEmployeesCount = employees.filter((e) => e.faceDescriptor && e.faceDescriptor.length > 0).length;
 
@@ -507,10 +519,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
         </div>
       )}
 
-      {/* Main Grid: Live Camera Stream + Real-time Employee Card */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Video feed column */}
-        <div className="lg:col-span-7 xl:col-span-8 flex flex-col">
+      {/* Main Grid: Live Camera Stream (Left) + Real-time Employee Identity Panel (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Video feed */}
+        <div className="lg:col-span-7 xl:col-span-7 flex flex-col">
           <div className="relative aspect-4/3 w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-md flex items-center justify-center">
             {/* Live Video Element */}
             <video
@@ -546,7 +558,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                   type="button"
                   onClick={() => startCamera()}
                   disabled={isModelLoading}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold text-sm rounded-xl inline-flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold text-sm rounded-xl inline-flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
                 >
                   <Camera className="w-4 h-4" />
                   Mulai Kamera
@@ -603,46 +615,105 @@ export const CameraView: React.FC<CameraViewProps> = ({
           </div>
         </div>
 
-        {/* Right side: Live Identification Card */}
-        <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+        {/* Right Column: Live Identification Panel (Desktop: Right column, Mobile: Stacked below) */}
+        <div id="realtime-identification-panel" className="lg:col-span-5 xl:col-span-5 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-200">
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
               Hasil Identifikasi Real-Time
             </h3>
-            {detectedFaces.length > 1 && (
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
+            {detectedFaces.length > 1 ? (
+              <span className="px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-bold flex items-center gap-1">
+                <Users className="w-3.5 h-3.5" />
                 Multi-Wajah ({detectedFaces.length})
+              </span>
+            ) : detectedFaces.length === 1 ? (
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold">
+                1 Wajah Terdeteksi
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-medium">
+                Standby
               </span>
             )}
           </div>
 
-          {/* Primary face identification card */}
-          <EmployeeCard
-            employee={primaryFace?.employee}
-            confidence={primaryFace?.confidence}
-            distance={primaryFace?.distance}
-            status={primaryStatus}
-            consecutiveMatches={primaryFace?.consecutiveMatches}
-          />
-
-          {/* If multiple faces are detected, display secondary cards */}
+          {/* Multi-face selector tabs when > 1 face is in frame */}
           {detectedFaces.length > 1 && (
-            <div className="mt-2 space-y-2">
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Wajah Tambahan Lainnya ({detectedFaces.length - 1}):
-              </h4>
-              {detectedFaces.slice(1).map((face, i) => (
-                <EmployeeCard
-                  key={i}
-                  employee={face.employee}
-                  confidence={face.confidence}
-                  distance={face.distance}
-                  status={face.isRecognized ? (face.isConfirmed ? 'recognized' : 'verifying') : 'unrecognized'}
-                  consecutiveMatches={face.consecutiveMatches}
-                  compact
-                />
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setSelectedFaceIndex('all')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-colors shrink-0 cursor-pointer ${
+                  selectedFaceIndex === 'all'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                Semua Wajah ({detectedFaces.length})
+              </button>
+              {detectedFaces.map((f, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setSelectedFaceIndex(idx)}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                    selectedFaceIndex === idx
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>Wajah {idx + 1}:</span>
+                  <span className="max-w-[90px] truncate font-medium">
+                    {f.employee?.nama ? f.employee.nama.split(' ')[0] : 'Unknown'}
+                  </span>
+                  {f.isRecognized && f.isConfirmed && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  )}
+                </button>
               ))}
             </div>
+          )}
+
+          {/* Primary or Multi-face Identity Presentation */}
+          {detectedFaces.length === 0 ? (
+            <EmployeeCard
+              status="no_face"
+            />
+          ) : selectedFaceIndex === 'all' && detectedFaces.length > 1 ? (
+            <div className="space-y-4">
+              {detectedFaces.map((face, idx) => (
+                <div key={idx} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 px-1 pt-1">
+                    <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px]">
+                      WAJAH {idx + 1}
+                    </span>
+                    <span className="text-slate-500 font-normal">
+                      {face.employee?.unit_kerja || 'Unit Kerja: -'}
+                    </span>
+                  </div>
+                  <EmployeeCard
+                    employee={face.employee}
+                    confidence={face.confidence}
+                    distance={face.distance}
+                    status={getFaceStatus(face)}
+                    consecutiveMatches={face.consecutiveMatches}
+                    faceIndex={idx}
+                    totalFaces={detectedFaces.length}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmployeeCard
+              employee={activeSelectedFace?.employee}
+              confidence={activeSelectedFace?.confidence}
+              distance={activeSelectedFace?.distance}
+              status={getFaceStatus(activeSelectedFace)}
+              consecutiveMatches={activeSelectedFace?.consecutiveMatches}
+              faceIndex={typeof selectedFaceIndex === 'number' ? selectedFaceIndex : 0}
+              totalFaces={detectedFaces.length}
+            />
           )}
         </div>
       </div>
