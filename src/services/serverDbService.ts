@@ -10,7 +10,7 @@
  * - /api/admin/* (upload-excel, upload-photos, save-embeddings, sync-all, backup, restore)
  */
 import { Employee, AppSettings, RecognitionLog, ServerDatabaseStatus, ServerBackupInfo } from '../types';
-import { saveEmployees, getAllEmployees } from './database';
+import { saveEmployees, getAllEmployees, clearAllEmployees } from './database';
 import { getStoredToken } from './authService';
 
 function getAuthHeaders(includeContentType = true): HeadersInit {
@@ -120,11 +120,12 @@ export async function fetchServerFaceDatabase(): Promise<{
 export async function syncClientWithServerMaster(): Promise<{
   synced: boolean;
   employeeCount: number;
+  employees: Employee[];
   status: ServerDatabaseStatus | null;
 }> {
   const status = await fetchServerStatus();
   if (!status || !status.ready || status.employeeCount === 0) {
-    return { synced: false, employeeCount: 0, status };
+    return { synced: false, employeeCount: 0, employees: [], status };
   }
 
   // Fetch employees and embeddings from server
@@ -147,17 +148,23 @@ export async function syncClientWithServerMaster(): Promise<{
       };
     });
 
-    // Save into local IndexedDB
-    await saveEmployees(updatedEmployees);
+    // Mirror cleanly into local IndexedDB
+    try {
+      await clearAllEmployees();
+      await saveEmployees(updatedEmployees);
+    } catch (e) {
+      console.warn('Could not mirror to IndexedDB cache, running in-memory:', e);
+    }
     console.log(`[CLIENT SYNC] Synchronized ${updatedEmployees.length} employees from Server Master.`);
     return {
       synced: true,
       employeeCount: updatedEmployees.length,
+      employees: updatedEmployees,
       status,
     };
   }
 
-  return { synced: false, employeeCount: 0, status };
+  return { synced: false, employeeCount: 0, employees: [], status };
 }
 
 /**
@@ -204,7 +211,7 @@ export async function uploadExcelToServer(
 }
 
 /**
- * Upload batch of photos & embeddings to Master Server
+ * Upload batch of photos & embeddings to Master Server in robust chunks
  */
 export async function uploadPhotosToServer(
   photos: Array<{
@@ -212,24 +219,40 @@ export async function uploadPhotosToServer(
     fileName?: string;
     base64?: string;
     descriptor?: number[];
-  }>
+  }>,
+  onProgress?: (current: number, total: number) => void
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const res = await fetch('/api/admin/upload-photos', {
-      method: 'POST',
-      headers: getAuthHeaders(true),
-      body: JSON.stringify({ photos }),
-      credentials: 'include',
-    });
+    if (!photos || photos.length === 0) {
+      return { success: true, message: 'Tidak ada foto untuk diunggah.' };
+    }
 
-    const { ok, data } = await safeReadJson<any>(res);
-    if (!ok || !data) {
-      throw new Error(data?.error || 'Gagal mengunggah foto ke server.');
+    const BATCH_SIZE = 15;
+    let processed = 0;
+
+    for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+      const batch = photos.slice(i, i + BATCH_SIZE);
+      const res = await fetch('/api/admin/upload-photos', {
+        method: 'POST',
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ photos: batch }),
+        credentials: 'include',
+      });
+
+      const { ok, data } = await safeReadJson<any>(res);
+      if (!ok || !data) {
+        throw new Error(data?.error || `Gagal mengunggah foto batch ${Math.floor(i / BATCH_SIZE) + 1} ke server.`);
+      }
+
+      processed += batch.length;
+      if (onProgress) {
+        onProgress(processed, photos.length);
+      }
     }
 
     return {
       success: true,
-      message: data.message || 'Foto berhasil disimpan di storage server.',
+      message: `Berhasil menyimpan ${processed} foto ke storage server.`,
     };
   } catch (err: unknown) {
     return {

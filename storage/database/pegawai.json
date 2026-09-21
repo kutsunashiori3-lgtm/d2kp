@@ -20,7 +20,14 @@
     "hasPhoto": true,
     "photoFileName": "198701012010011001.jpg",
     "photoStatus": "ready",
-    "updatedAt": 1789953415937
+    "updatedAt": 1789979638625,
+    "faceDescriptor": [
+      0.1,
+      0.2,
+      -0.3,
+      0.4
+    ],
+    "photoUrl": "/api/photos/198701012010011001"
   },
   {
     "nomor_induk": "198802152011021002",

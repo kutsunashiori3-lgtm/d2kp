@@ -168,6 +168,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
+      {/* STATUS DATA SERVER (Single Source of Truth) */}
+      <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 shadow-md">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
+          <div className="flex items-center gap-2 font-mono text-xs font-bold text-slate-300 uppercase tracking-wider">
+            <Server className="w-4 h-4 text-emerald-400" />
+            <span>STATUS SERVER (Single Source of Truth)</span>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Server Database : CONNECTED
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 font-mono">
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Database Pegawai</div>
+            <div className="text-xl font-extrabold text-white mt-1">
+              {serverStatus ? serverStatus.employeeCount.toLocaleString('id-ID') : '...'}
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">Tersimpan di Server</span>
+          </div>
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Foto Pegawai</div>
+            <div className="text-xl font-extrabold text-emerald-400 mt-1">
+              {serverStatus ? serverStatus.photoCount.toLocaleString('id-ID') : '...'}
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">Storage Foto Server</span>
+          </div>
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Face Embedding</div>
+            <div className="text-xl font-extrabold text-purple-400 mt-1">
+              {serverStatus ? serverStatus.embeddingCount.toLocaleString('id-ID') : '...'}
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">128-D Vektor Wajah</span>
+          </div>
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Excel Master</div>
+            <div className="text-xl font-extrabold text-blue-400 mt-1">
+              {serverStatus?.excelFileName ? 'Tersedia' : 'Belum Ada'}
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">{serverStatus?.excelFileName || 'pegawai.xlsx'}</span>
+          </div>
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Server Database</div>
+            <div className="text-xl font-extrabold text-emerald-400 mt-1 flex items-center gap-1.5">
+              <span>CONNECTED</span>
+            </div>
+            <span className="text-[10px] text-emerald-300 mt-0.5 block">Port 3000 Active</span>
+          </div>
+        </div>
+      </div>
+
       {/* Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {/* 1. Total Pegawai (Excel) */}

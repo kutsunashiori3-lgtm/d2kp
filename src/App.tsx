@@ -94,27 +94,41 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState<ServerDatabaseStatus | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Load all data from IndexedDB & Master Server
+  // Load all data from Master Server (Single Source of Truth) with local fallback
   const refreshAllData = useCallback(async () => {
     try {
-      // 1. Fetch server status
+      // 1. Fetch live master server status
       const sStatus = await fetchServerStatus();
       setServerStatus(sStatus);
 
-      // 2. Fetch local IndexedDB
-      let empList = await getAllEmployees();
+      let empList: Employee[] = [];
 
-      // If local is empty but server has employees, auto-sync from Master Server
-      if (empList.length === 0 && sStatus && sStatus.ready && sStatus.employeeCount > 0) {
-        console.log('[AUTO-SYNC] Server has employees, pulling to local cache...');
+      if (sStatus && sStatus.ready && sStatus.employeeCount > 0) {
+        // SERVER IS THE MASTER DATA SOURCE! Pull from server and mirror to local cache
         const syncRes = await syncClientWithServerMaster();
-        if (syncRes.synced) {
+        if (syncRes.synced && syncRes.employees.length > 0) {
+          empList = syncRes.employees;
+        } else {
           empList = await getAllEmployees();
+        }
+      } else {
+        // Server has no employees yet: check if local client has existing data to migrate
+        const localList = await getAllEmployees();
+        if (localList.length > 0) {
+          console.log('[AUTO-MIGRATION] Migrating existing local client data to Server Master...');
+          const migRes = await syncAllDataToServer();
+          if (migRes.success) {
+            const updatedStatus = await fetchServerStatus();
+            setServerStatus(updatedStatus);
+          }
+          empList = localList;
+        } else {
+          empList = [];
         }
       }
 
       const [dbStats, appSettings, logs] = await Promise.all([
-        calculateDatabaseStats(),
+        calculateDatabaseStats(empList),
         getStoredSettings(),
         getAllLogs(),
       ]);

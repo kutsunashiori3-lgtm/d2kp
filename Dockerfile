@@ -1,14 +1,32 @@
-FROM node:20-alpine AS build
+FROM node:20-alpine
 WORKDIR /app
 
+# Install dependencies
 COPY package*.json ./
 RUN npm install
 
+# Copy source and build
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+# Create persistent storage directories
+RUN mkdir -p /app/storage/database \
+    /app/storage/excel \
+    /app/storage/photos \
+    /app/storage/embeddings \
+    /app/storage/backups \
+    /app/storage/logs \
+    /app/storage/settings \
+    /app/data
 
-CMD ["nginx", "-g", "daemon off;"]
+# Persistent volumes for database, photos, embeddings, and excel
+VOLUME ["/app/storage", "/app/data"]
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV STORAGE_PATH=/app/storage
+
+EXPOSE 3000
+
+CMD ["node", "dist/server.cjs"]
+

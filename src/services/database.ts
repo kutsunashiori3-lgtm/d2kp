@@ -202,8 +202,8 @@ export async function saveStoredSettings(settings: AppSettings): Promise<void> {
   });
 }
 
-export async function calculateDatabaseStats(): Promise<DatabaseStats> {
-  const employees = await getAllEmployees();
+export async function calculateDatabaseStats(empList?: Employee[]): Promise<DatabaseStats> {
+  const employees = empList && empList.length > 0 ? empList : await getAllEmployees();
   
   let totalPhotos = 0;
   let connected = 0;

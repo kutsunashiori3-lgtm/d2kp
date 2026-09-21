@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "ready": true,
+  "employeeCount": 5,
+  "photoCount": 0,
+  "embeddingCount": 1,
+  "excelFileName": "pegawai.xlsx",
+  "lastUpdated": "2026-09-21T08:35:11.568Z",
+  "storageReady": true,
+  "storagePath": "/app/applet/storage"
+}

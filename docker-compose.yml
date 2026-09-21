@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  face-recognition-server:
+    build: .
+    container_name: face-recognition-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - STORAGE_PATH=/app/storage
+      - JWT_SECRET=master-face-recognition-secret-key-production
+    volumes:
+      # Persistent host storage: data survives container restart and recreate
+      - ./storage:/app/storage
+      - ./data:/app/data

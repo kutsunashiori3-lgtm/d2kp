@@ -185,15 +185,53 @@ interface SessionData {
   expiresAt: number;
 }
 
-const activeSessions = new Map<string, SessionData>();
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+
+function loadSessions(): Map<string, SessionData> {
+  const map = new Map<string, SessionData>();
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+      const now = Date.now();
+      for (const [token, sess] of Object.entries(data)) {
+        const s = sess as SessionData;
+        if (s && s.expiresAt > now) {
+          map.set(token, s);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load sessions file:', err);
+  }
+  return map;
+}
+
+function persistSessions(map: Map<string, SessionData>): void {
+  try {
+    const obj: Record<string, SessionData> = {};
+    for (const [token, sess] of map.entries()) {
+      obj[token] = sess;
+    }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not persist sessions:', err);
+  }
+}
+
+const activeSessions = loadSessions();
 
 // Periodic cleanup of expired sessions every 10 minutes
 setInterval(() => {
   const now = Date.now();
+  let changed = false;
   for (const [token, sess] of activeSessions.entries()) {
     if (sess.expiresAt <= now) {
       activeSessions.delete(token);
+      changed = true;
     }
+  }
+  if (changed) {
+    persistSessions(activeSessions);
   }
 }, 10 * 60 * 1000);
 
@@ -412,6 +450,7 @@ const handleLogin = (req: Request, res: Response) => {
     };
 
     activeSessions.set(token, sessionData);
+    persistSessions(activeSessions);
 
     // Set HTTP-only cookie
     const isProd = process.env.NODE_ENV === 'production';
@@ -461,6 +500,7 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
 
   if (token) {
     activeSessions.delete(token);
+    persistSessions(activeSessions);
   }
 
   res.clearCookie('session_token', { path: '/' });
@@ -638,8 +678,16 @@ app.post('/api/admin/upload-excel', requireAdmin, upload.single('file'), (req: A
       if (req.body.fileName) fileName = req.body.fileName;
     }
 
-    if (req.body && Array.isArray(req.body.employees)) {
-      incomingEmployees = req.body.employees;
+    if (req.body && req.body.employees) {
+      if (Array.isArray(req.body.employees)) {
+        incomingEmployees = req.body.employees;
+      } else if (typeof req.body.employees === 'string') {
+        try {
+          incomingEmployees = JSON.parse(req.body.employees);
+        } catch (e) {
+          console.warn('Failed to parse incoming employees JSON:', e);
+        }
+      }
     }
 
     if (fileBuffer) {
@@ -652,26 +700,31 @@ app.post('/api/admin/upload-excel', requireAdmin, upload.single('file'), (req: A
       const existingMap = new Map<string, ServerEmployee>();
       existing.forEach((e) => existingMap.set(e.nomor_induk, e));
 
-      // Merge to preserve existing photo and embedding if already uploaded
-      const merged = incomingEmployees.map((emp) => {
+      // Upsert: prevent duplicate, update existing, add new, retain old
+      for (const emp of incomingEmployees) {
+        if (!emp.nomor_induk) continue;
         const prev = existingMap.get(emp.nomor_induk);
         if (prev) {
-          return {
+          existingMap.set(emp.nomor_induk, {
+            ...prev,
             ...emp,
-            hasPhoto: prev.hasPhoto,
+            hasPhoto: prev.hasPhoto || emp.hasPhoto,
             photoFileName: prev.photoFileName || emp.photoFileName,
             photoUrl: prev.photoUrl || emp.photoUrl,
             faceDescriptor: prev.faceDescriptor || emp.faceDescriptor,
             photoStatus: prev.photoStatus !== 'no_photo' ? prev.photoStatus : emp.photoStatus,
+            extraFields: { ...(prev.extraFields || {}), ...(emp.extraFields || {}) },
             updatedAt: Date.now(),
-          };
+          });
+        } else {
+          existingMap.set(emp.nomor_induk, {
+            ...emp,
+            updatedAt: Date.now(),
+          });
         }
-        return {
-          ...emp,
-          updatedAt: Date.now(),
-        };
-      });
+      }
 
+      const merged = Array.from(existingMap.values());
       saveServerEmployees(merged);
       const status = getServerStatus();
       res.json({
@@ -781,16 +834,19 @@ app.post('/api/admin/upload-photos', requireAdmin, upload.array('photos', 500), 
       saveEmbeddings(newEmbeddings);
     }
 
-    // Update photoStatus for employees in pegawai.json
+    // Update photoStatus and photoUrl for employees in pegawai.json
     const employees = getAllServerEmployees();
     let empUpdated = false;
     for (const emp of employees) {
       const hasPhotoFile = Boolean(getPhotoFilePath(emp.nomor_induk));
-      if (hasPhotoFile && (!emp.hasPhoto || emp.photoStatus === 'no_photo')) {
-        emp.hasPhoto = true;
-        emp.photoFileName = `${emp.nomor_induk}.jpg`;
-        emp.photoStatus = 'ready';
-        empUpdated = true;
+      if (hasPhotoFile) {
+        if (!emp.hasPhoto || emp.photoStatus === 'no_photo' || !emp.photoUrl) {
+          emp.hasPhoto = true;
+          emp.photoFileName = `${emp.nomor_induk}.jpg`;
+          emp.photoUrl = `/api/photos/${emp.nomor_induk}`;
+          emp.photoStatus = 'ready';
+          empUpdated = true;
+        }
       }
     }
     if (empUpdated) {
@@ -838,12 +894,52 @@ app.post('/api/admin/sync-all-to-server', requireAdmin, (req: AuthenticatedReque
   try {
     const { employees, embeddings, settings, logs, photos } = req.body || {};
 
-    if (Array.isArray(employees) && employees.length > 0) {
-      saveServerEmployees(employees);
+    if (photos && typeof photos === 'object') {
+      for (const [nomorInduk, b64] of Object.entries(photos)) {
+        if (typeof b64 === 'string') {
+          const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
+          const buf = Buffer.from(cleanB64, 'base64');
+          savePhotoFile(nomorInduk, buf, 'jpg');
+        }
+      }
     }
 
     if (embeddings && typeof embeddings === 'object') {
       saveEmbeddings(embeddings);
+    }
+
+    if (Array.isArray(employees) && employees.length > 0) {
+      const existing = getAllServerEmployees();
+      const existingMap = new Map<string, ServerEmployee>();
+      existing.forEach((e) => existingMap.set(e.nomor_induk, e));
+
+      for (const emp of employees) {
+        if (!emp.nomor_induk) continue;
+        const prev = existingMap.get(emp.nomor_induk);
+        const hasPhotoFile = Boolean(getPhotoFilePath(emp.nomor_induk));
+        if (prev) {
+          existingMap.set(emp.nomor_induk, {
+            ...prev,
+            ...emp,
+            hasPhoto: prev.hasPhoto || emp.hasPhoto || hasPhotoFile,
+            photoFileName: prev.photoFileName || emp.photoFileName || (hasPhotoFile ? `${emp.nomor_induk}.jpg` : undefined),
+            photoUrl: `/api/photos/${emp.nomor_induk}`,
+            faceDescriptor: emp.faceDescriptor || prev.faceDescriptor,
+            photoStatus: emp.photoStatus !== 'no_photo' ? emp.photoStatus : prev.photoStatus,
+            extraFields: { ...(prev.extraFields || {}), ...(emp.extraFields || {}) },
+            updatedAt: Date.now(),
+          });
+        } else {
+          existingMap.set(emp.nomor_induk, {
+            ...emp,
+            hasPhoto: emp.hasPhoto || hasPhotoFile,
+            photoFileName: emp.photoFileName || (hasPhotoFile ? `${emp.nomor_induk}.jpg` : undefined),
+            photoUrl: `/api/photos/${emp.nomor_induk}`,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      saveServerEmployees(Array.from(existingMap.values()));
     }
 
     if (settings && typeof settings === 'object') {
@@ -853,16 +949,6 @@ app.post('/api/admin/sync-all-to-server', requireAdmin, (req: AuthenticatedReque
     if (Array.isArray(logs) && logs.length > 0) {
       for (const item of logs.slice().reverse()) {
         appendServerLog(item);
-      }
-    }
-
-    if (photos && typeof photos === 'object') {
-      for (const [nomorInduk, b64] of Object.entries(photos)) {
-        if (typeof b64 === 'string') {
-          const cleanB64 = b64.replace(/^data:image\/\w+;base64,/, '');
-          const buf = Buffer.from(cleanB64, 'base64');
-          savePhotoFile(nomorInduk, buf, 'jpg');
-        }
       }
     }
 

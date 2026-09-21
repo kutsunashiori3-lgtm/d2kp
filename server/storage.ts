@@ -214,38 +214,10 @@ function ensureInitialDatabaseState(): void {
 }
 
 /**
- * Get current server database status
+ * Get current server database status with live accurate counts from storage
  */
 export function getServerStatus(): ServerMetadata {
-  try {
-    if (fs.existsSync(METADATA_FILE)) {
-      const raw = fs.readFileSync(METADATA_FILE, 'utf-8');
-      const meta = JSON.parse(raw);
-      return {
-        ...meta,
-        storageReady: true,
-        storagePath: STORAGE_PATH,
-      };
-    }
-  } catch (err) {
-    console.error('Failed to read metadata:', err);
-  }
-
-  const emps = getAllServerEmployees();
-  const photos = getPhotoCount();
-  const embeddings = getAllEmbeddings();
-
-  return {
-    version: 1,
-    ready: emps.length > 0,
-    employeeCount: emps.length,
-    photoCount: photos,
-    embeddingCount: Object.keys(embeddings).length,
-    excelFileName: fs.existsSync(MASTER_EXCEL_FILE) ? 'pegawai.xlsx' : undefined,
-    lastUpdated: new Date().toISOString(),
-    storageReady: true,
-    storagePath: STORAGE_PATH,
-  };
+  return updateMetadataCounts(false);
 }
 
 /**
@@ -364,7 +336,7 @@ export function getAllEmbeddings(): Record<string, number[]> {
 }
 
 /**
- * Save embeddings map to persistent storage
+ * Save embeddings map to persistent storage and sync with employee records
  */
 export function saveEmbeddings(newEmbeddings: Record<string, number[]>): void {
   const existing = getAllEmbeddings();
@@ -373,16 +345,52 @@ export function saveEmbeddings(newEmbeddings: Record<string, number[]>): void {
 
   // Also sync into pegawai.json
   const employees = getAllServerEmployees();
+  const empMap = new Map<string, ServerEmployee>();
+  employees.forEach((e) => empMap.set(e.nomor_induk, e));
+
   let changed = false;
-  for (const emp of employees) {
-    if (merged[emp.nomor_induk] && (!emp.faceDescriptor || emp.faceDescriptor.length === 0)) {
-      emp.faceDescriptor = merged[emp.nomor_induk];
-      emp.photoStatus = 'ready';
+
+  for (const [id, descriptor] of Object.entries(merged)) {
+    if (!id || !Array.isArray(descriptor) || descriptor.length === 0) continue;
+    const existingEmp = empMap.get(id);
+    if (existingEmp) {
+      existingEmp.faceDescriptor = descriptor;
+      existingEmp.photoStatus = 'ready';
+      existingEmp.hasPhoto = true;
+      if (!existingEmp.photoUrl) {
+        existingEmp.photoUrl = `/api/photos/${id}`;
+      }
+      if (!existingEmp.photoFileName) {
+        existingEmp.photoFileName = `${id}.jpg`;
+      }
+      existingEmp.updatedAt = Date.now();
+      changed = true;
+    } else {
+      // Photo and embedding exists, create employee entry
+      const newEmp: ServerEmployee = {
+        nomor_induk: id,
+        nama: `Pegawai ${id}`,
+        nip: id,
+        jabatan: '-',
+        pangkat_golongan: '-',
+        unit_kerja: 'Data Excel Belum Diimpor',
+        instansi: '-',
+        hasPhoto: true,
+        photoFileName: `${id}.jpg`,
+        photoUrl: `/api/photos/${id}`,
+        faceDescriptor: descriptor,
+        photoStatus: 'ready',
+        extraFields: { _isPhotoOnly: 'true' },
+        updatedAt: Date.now(),
+      };
+      empMap.set(id, newEmp);
       changed = true;
     }
   }
+
   if (changed) {
-    fs.writeFileSync(PEGAWAI_FILE, JSON.stringify(employees, null, 2), 'utf-8');
+    const updatedEmployees = Array.from(empMap.values());
+    fs.writeFileSync(PEGAWAI_FILE, JSON.stringify(updatedEmployees, null, 2), 'utf-8');
   }
 
   updateMetadataCounts(true);
@@ -395,6 +403,7 @@ export function savePhotoFile(nomorInduk: string, buffer: Buffer, ext = 'jpg'): 
   const fileName = `${nomorInduk}.${ext}`;
   const filePath = path.join(PHOTO_PATH, fileName);
   fs.writeFileSync(filePath, buffer);
+  updateMetadataCounts(false);
   return fileName;
 }
 
