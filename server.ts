@@ -44,6 +44,28 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(cookieParser());
 
+// Support CORS and preflight requests (supports reverse proxies, custom ports, and cross-origin)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
+// Handle JSON parse error gracefully
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
+    res.status(400).json({ error: 'Format JSON body tidak valid atau kosong.' });
+    return;
+  }
+  next(err);
+});
+
 // Trust proxy for secure cookies in Cloud Run / Nginx
 app.set('trust proxy', 1);
 
@@ -291,90 +313,143 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
 // 5. Auth API Routes
 // ==========================================
 
-// POST /api/auth/login
-app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { username, password } = req.body || {};
-
-  if (!username || !password) {
-    res.status(400).json({ error: 'Username dan password wajib diisi.' });
-    return;
-  }
-
-  const cleanUsername = String(username).trim().toLowerCase();
+const handleLogin = (req: Request, res: Response) => {
+  const endpoint = req.originalUrl || req.url;
   const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
-  const rateLimitKey = `${clientIp}_${cleanUsername}`;
+  console.log(`[AUTH LOG] Endpoint called: ${endpoint}, Request received from IP: ${clientIp}`);
 
-  // Check rate limit
-  const rateCheck = checkRateLimit(rateLimitKey);
-  if (!rateCheck.allowed) {
-    res.status(429).json({
-      error: 'Too many login attempts. Silakan coba lagi beberapa saat.',
-      retryAfterSeconds: rateCheck.waitSeconds,
-    });
-    return;
-  }
+  try {
+    const { username, password } = req.body || {};
 
-  const users = getAllUsers();
-  const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
+    if (!username || !password) {
+      console.log(`[AUTH LOG] Missing username or password. Response status: 400`);
+      res.status(400).json({
+        success: false,
+        message: 'Username dan password wajib diisi.',
+        error: 'Username dan password wajib diisi.',
+      });
+      return;
+    }
 
-  if (!user) {
-    recordFailedLogin(rateLimitKey);
-    // Generic message to prevent username enumeration
-    res.status(401).json({ error: 'Username atau password salah.' });
-    return;
-  }
+    const cleanUsername = String(username).trim().toLowerCase();
+    console.log(`[AUTH LOG] Received login request for username: '${cleanUsername}'`);
 
-  const isPasswordMatch = bcrypt.compareSync(String(password), user.password_hash);
-  if (!isPasswordMatch) {
-    recordFailedLogin(rateLimitKey);
-    res.status(401).json({ error: 'Username atau password salah.' });
-    return;
-  }
+    const rateLimitKey = `${clientIp}_${cleanUsername}`;
 
-  // Clear rate limits upon successful login
-  clearRateLimit(rateLimitKey);
+    // Check rate limit
+    const rateCheck = checkRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      console.log(`[AUTH LOG] Rate limit exceeded for '${cleanUsername}'. Response status: 429`);
+      res.status(429).json({
+        success: false,
+        message: 'Terlalu banyak percobaan login. Silakan coba lagi beberapa saat.',
+        error: 'Too many login attempts.',
+        retryAfterSeconds: rateCheck.waitSeconds,
+      });
+      return;
+    }
 
-  // Update last_login
-  user.last_login = Date.now();
-  saveUsers(users);
+    let users: UserRecord[] = [];
+    try {
+      users = getAllUsers();
+    } catch (dbErr) {
+      console.error(`[AUTH LOG] Database read error for users:`, dbErr);
+      res.status(500).json({
+        success: false,
+        message: 'Terjadi kesalahan pada server',
+        error: 'Gagal mengakses database pengguna.',
+      });
+      return;
+    }
 
-  // Generate cryptographically secure session token
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + SESSION_DURATION_MS;
+    const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
 
-  const sessionData: SessionData = {
-    id: token,
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    createdAt: Date.now(),
-    expiresAt,
-  };
+    if (!user) {
+      recordFailedLogin(rateLimitKey);
+      console.log(`[AUTH LOG] Authentication status: FAILED (User '${cleanUsername}' not found). Response status: 401`);
+      res.status(401).json({
+        success: false,
+        message: 'Username atau password salah',
+        error: 'Username atau password salah',
+      });
+      return;
+    }
 
-  activeSessions.set(token, sessionData);
+    const isPasswordMatch = bcrypt.compareSync(String(password), user.password_hash);
+    if (!isPasswordMatch) {
+      recordFailedLogin(rateLimitKey);
+      console.log(`[AUTH LOG] Authentication status: FAILED (Password mismatch for '${cleanUsername}'). Response status: 401`);
+      res.status(401).json({
+        success: false,
+        message: 'Username atau password salah',
+        error: 'Username atau password salah',
+      });
+      return;
+    }
 
-  // Set HTTP-only cookie
-  const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('session_token', token, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: SESSION_DURATION_MS,
-    path: '/',
-  });
+    // Clear rate limits upon successful login
+    clearRateLimit(rateLimitKey);
 
-  res.json({
-    success: true,
-    token, // Also returned for client Bearer header authorization if needed
-    user: {
-      id: user.id,
+    // Update last_login
+    user.last_login = Date.now();
+    try {
+      saveUsers(users);
+    } catch (saveErr) {
+      console.error(`[AUTH LOG] Database save error for last_login:`, saveErr);
+    }
+
+    // Generate cryptographically secure session token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = Date.now() + SESSION_DURATION_MS;
+
+    const sessionData: SessionData = {
+      id: token,
+      userId: user.id,
       username: user.username,
       role: user.role,
-      last_login: user.last_login,
-    },
-    expiresAt,
-  });
-});
+      createdAt: Date.now(),
+      expiresAt,
+    };
+
+    activeSessions.set(token, sessionData);
+
+    // Set HTTP-only cookie
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('session_token', token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: SESSION_DURATION_MS,
+      path: '/',
+    });
+
+    console.log(`[AUTH LOG] Authentication status: SUCCESS for user '${user.username}' (role: ${user.role}). Response status: 200`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Login berhasil',
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        last_login: user.last_login,
+      },
+      expiresAt,
+    });
+  } catch (err: unknown) {
+    console.error('[AUTH LOG] Internal server error in login handler:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Terjadi kesalahan pada server',
+      error: 'Terjadi kesalahan pada server',
+    });
+  }
+};
+
+// Mount both standard routes
+app.post('/api/auth/login', handleLogin);
+app.post('/api/login', handleLogin);
 
 // POST /api/auth/logout
 app.post('/api/auth/logout', (req: Request, res: Response) => {
@@ -877,6 +952,13 @@ app.delete('/api/admin/database', requireAdmin, (req: AuthenticatedRequest, res:
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal mereset database server.' });
   }
+});
+
+// Ensure any unhandled API routes return a structured JSON response instead of HTML or empty
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({
+    error: `Endpoint API '${req.method} ${req.path}' tidak ditemukan di server.`,
+  });
 });
 
 // ==========================================

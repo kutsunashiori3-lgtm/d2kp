@@ -26,6 +26,21 @@ function getAuthHeaders(includeContentType = true): HeadersInit {
 }
 
 /**
+ * Safe JSON parser helper to prevent "Unexpected end of JSON input" errors
+ */
+async function safeReadJson<T = any>(res: Response): Promise<{ ok: boolean; status: number; data: T | null }> {
+  try {
+    const text = await res.text();
+    if (!text || text.trim().length === 0) {
+      return { ok: res.ok, status: res.status, data: null };
+    }
+    return { ok: res.ok, status: res.status, data: JSON.parse(text) };
+  } catch {
+    return { ok: res.ok, status: res.status, data: null };
+  }
+}
+
+/**
  * Fetch server database status (ready, version, employeeCount, photoCount, embeddingCount)
  */
 export async function fetchServerStatus(): Promise<ServerDatabaseStatus | null> {
@@ -34,8 +49,8 @@ export async function fetchServerStatus(): Promise<ServerDatabaseStatus | null> 
       headers: getAuthHeaders(false),
       credentials: 'include',
     });
-    if (!res.ok) return null;
-    const data = await res.json();
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) return null;
     return {
       ready: Boolean(data.ready),
       version: Number(data.version) || 1,
@@ -62,8 +77,8 @@ export async function fetchServerEmployees(): Promise<Employee[]> {
       headers: getAuthHeaders(false),
       credentials: 'include',
     });
-    if (!res.ok) throw new Error('Gagal mengambil data pegawai dari server');
-    const data = await res.json();
+    const { ok, data } = await safeReadJson<{ employees: Employee[] }>(res);
+    if (!ok || !data) return [];
     return data.employees || [];
   } catch (err) {
     console.error('fetchServerEmployees error:', err);
@@ -84,8 +99,8 @@ export async function fetchServerFaceDatabase(): Promise<{
       headers: getAuthHeaders(false),
       credentials: 'include',
     });
-    if (!res.ok) throw new Error('Gagal mengambil database wajah dari server');
-    const data = await res.json();
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) return { version: 1, count: 0, embeddings: {} };
     return {
       version: data.version || 1,
       count: data.count || 0,
@@ -170,9 +185,9 @@ export async function uploadExcelToServer(
       credentials: 'include',
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Gagal mengunggah file Excel ke server.');
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) {
+      throw new Error(data?.error || 'Gagal mengunggah file Excel ke server.');
     }
 
     return {
@@ -207,9 +222,9 @@ export async function uploadPhotosToServer(
       credentials: 'include',
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Gagal mengunggah foto ke server.');
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) {
+      throw new Error(data?.error || 'Gagal mengunggah foto ke server.');
     }
 
     return {
@@ -280,9 +295,9 @@ export async function syncAllDataToServer(): Promise<{
       credentials: 'include',
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Gagal sinkronisasi data ke server.');
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) {
+      throw new Error(data?.error || 'Gagal sinkronisasi data ke server.');
     }
 
     return {
@@ -308,8 +323,8 @@ export async function createDatabaseBackup(): Promise<ServerBackupInfo | null> {
       headers: getAuthHeaders(true),
       credentials: 'include',
     });
-    const data = await res.json();
-    if (res.ok && data.backup) {
+    const { ok, data } = await safeReadJson<any>(res);
+    if (ok && data && data.backup) {
       return data.backup;
     }
     return null;
@@ -328,8 +343,8 @@ export async function listDatabaseBackups(): Promise<ServerBackupInfo[]> {
       headers: getAuthHeaders(false),
       credentials: 'include',
     });
-    const data = await res.json();
-    return data.backups || [];
+    const { data } = await safeReadJson<any>(res);
+    return data?.backups || [];
   } catch (err) {
     console.error('listDatabaseBackups error:', err);
     return [];
@@ -347,13 +362,13 @@ export async function restoreDatabaseBackup(backupId: string): Promise<boolean> 
       body: JSON.stringify({ backupId }),
       credentials: 'include',
     });
-    const data = await res.json();
-    if (res.ok) {
+    const { ok, data } = await safeReadJson<any>(res);
+    if (ok) {
       // After restore on server, sync local cache
       await syncClientWithServerMaster();
       return true;
     }
-    alert(data.error || 'Gagal memulihkan database.');
+    alert(data?.error || 'Gagal memulihkan database.');
     return false;
   } catch (err) {
     console.error('restoreDatabaseBackup error:', err);
