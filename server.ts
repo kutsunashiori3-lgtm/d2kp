@@ -34,6 +34,15 @@ import {
   restoreBackup,
   resetServerDatabase,
   STORAGE_PATH,
+  EXCEL_PATH,
+  PHOTO_PATH,
+  SYNC_LOG_FILE,
+  FILE_TRACKING_FILE,
+  scanAndSyncServerFiles,
+  applyEmbeddingResults,
+  getSyncLogContent,
+  loadFileTracking,
+  appendSyncLog,
   ServerEmployee,
 } from './server/storage';
 
@@ -628,6 +637,127 @@ app.get('/api/photos/:nomor_induk', (req: Request, res: Response) => {
   res.sendFile(photoPath);
 });
 
+// ==========================================
+// AUTOMATIC SERVER FOLDER SYNC API ENDPOINTS
+// ==========================================
+
+// GET /api/sync/status (Protected)
+app.get('/api/sync/status', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const status = getServerStatus();
+  const tracking = loadFileTracking();
+  const recentLog = getSyncLogContent(30);
+
+  const excelFiles = fs.existsSync(EXCEL_PATH)
+    ? fs.readdirSync(EXCEL_PATH).filter((f) => (f.endsWith('.xlsx') || f.endsWith('.xls')) && !f.startsWith('~$'))
+    : [];
+
+  const photoCount = fs.existsSync(PHOTO_PATH)
+    ? fs.readdirSync(PHOTO_PATH).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).length
+    : 0;
+
+  res.json({
+    status: 'ok',
+    storageReady: status.storageReady,
+    storagePath: status.storagePath,
+    excelFolder: EXCEL_PATH,
+    photoFolder: PHOTO_PATH,
+    excelFiles,
+    excelMaster: status.excelFileName || (excelFiles[0] ?? 'master_pegawai.xlsx'),
+    totalEmployees: status.employeeCount,
+    totalPhotos: photoCount,
+    totalEmbeddings: status.embeddingCount,
+    lastSyncTime: status.lastUpdated,
+    recentLog,
+  });
+});
+
+// POST /api/sync/scan (Protected) - Trigger server folder read & sync
+app.post('/api/sync/scan', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await scanAndSyncServerFiles();
+    res.json({
+      status: 'ok',
+      ...result,
+    });
+  } catch (err) {
+    console.error('Error running server scan:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memindai folder server.' });
+  }
+});
+
+// POST /api/sync/apply-embeddings (Protected) - Apply newly computed descriptors
+app.post('/api/sync/apply-embeddings', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { results } = req.body || {};
+    if (!Array.isArray(results)) {
+      res.status(400).json({ error: 'Array results wajib dicantumkan.' });
+      return;
+    }
+
+    const syncResult = await applyEmbeddingResults(results);
+    res.json({
+      status: 'ok',
+      ...syncResult,
+    });
+  } catch (err) {
+    console.error('Error applying embeddings:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menyimpan embedding wajah.' });
+  }
+});
+
+// GET /api/sync/log (Protected) - View sync.log
+app.get('/api/sync/log', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const log = getSyncLogContent(300);
+  res.json({ status: 'ok', log });
+});
+
+// GET /api/sync/files (Protected) - List server storage files for inspection
+app.get('/api/sync/files', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const excelFiles = fs.existsSync(EXCEL_PATH)
+      ? fs.readdirSync(EXCEL_PATH).filter((f) => !f.startsWith('~$')).map((f) => {
+          const p = path.join(EXCEL_PATH, f);
+          const stat = fs.statSync(p);
+          return {
+            name: f,
+            size: stat.size,
+            mtime: stat.mtimeMs,
+            path: `/storage/excel/${f}`,
+          };
+        })
+      : [];
+
+    const rawPhotos = fs.existsSync(PHOTO_PATH)
+      ? fs.readdirSync(PHOTO_PATH).filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+      : [];
+
+    // Return first 50 sample photos with status
+    const tracking = loadFileTracking();
+    const photoSample = rawPhotos.slice(0, 100).map((f) => {
+      const p = path.join(PHOTO_PATH, f);
+      const stat = fs.statSync(p);
+      const track = tracking.photos[f];
+      return {
+        name: f,
+        nomorInduk: path.parse(f).name,
+        size: stat.size,
+        mtime: stat.mtimeMs,
+        status: track?.status || 'ready',
+        hasEmbedding: track?.hasEmbedding || false,
+      };
+    });
+
+    res.json({
+      status: 'ok',
+      excelFiles,
+      totalPhotos: rawPhotos.length,
+      photoSample,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal membaca daftar file server.' });
+  }
+});
+
 // GET & POST /api/settings (Protected)
 app.get('/api/settings', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const settings = getServerSettings();
@@ -1065,9 +1195,70 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[SERVER] Face Recognition server running on http://0.0.0.0:${PORT}`);
     console.log(`[AUTH] Session timeout configured to: ${SESSION_DURATION_MS / (1000 * 60 * 60)} hours.`);
+    console.log(`[STORAGE] Storage root: ${STORAGE_PATH}`);
+    console.log(`[STORAGE] Excel folder: ${EXCEL_PATH}`);
+    console.log(`[STORAGE] Photos folder: ${PHOTO_PATH}`);
+
+    // Initial folder scan on startup
+    try {
+      console.log('[STARTUP] Memindai folder /storage/excel/ dan /storage/photos/...');
+      const initResult = await scanAndSyncServerFiles();
+      console.log(`[STARTUP] Sinkronisasi selesai: ${initResult.totalEmployees} pegawai, ${initResult.totalPhotos} foto, ${initResult.totalEmbeddings} embedding.`);
+    } catch (err) {
+      console.error('[STARTUP] Gagal sinkronisasi awal folder server:', err);
+    }
+
+    // Filesystem watchers with debouncing
+    let syncDebounceTimer: NodeJS.Timeout | null = null;
+    const triggerDebouncedSync = (source: string) => {
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      syncDebounceTimer = setTimeout(async () => {
+        try {
+          console.log(`[WATCHER] Perubahan file terdeteksi pada ${source}, menjalankan sinkronisasi otomatis...`);
+          await scanAndSyncServerFiles();
+        } catch (err) {
+          console.error('[WATCHER] Gagal sinkronisasi otomatis:', err);
+        }
+      }, 2000);
+    };
+
+    if (fs.existsSync(EXCEL_PATH)) {
+      try {
+        fs.watch(EXCEL_PATH, (eventType, filename) => {
+          if (filename && !filename.startsWith('~$')) {
+            triggerDebouncedSync(`folder excel (${filename})`);
+          }
+        });
+        console.log('[WATCHER] Filesystem watcher aktif pada /storage/excel/');
+      } catch (e) {
+        console.warn('[WATCHER] Gagal mengaktifkan watch pada folder excel:', e);
+      }
+    }
+
+    if (fs.existsSync(PHOTO_PATH)) {
+      try {
+        fs.watch(PHOTO_PATH, (eventType, filename) => {
+          if (filename && !filename.startsWith('.')) {
+            triggerDebouncedSync(`folder photos (${filename})`);
+          }
+        });
+        console.log('[WATCHER] Filesystem watcher aktif pada /storage/photos/');
+      } catch (e) {
+        console.warn('[WATCHER] Gagal mengaktifkan watch pada folder photos:', e);
+      }
+    }
+
+    // Scheduled background check every 30 seconds
+    setInterval(async () => {
+      try {
+        await scanAndSyncServerFiles();
+      } catch {
+        // ignore background interval errors
+      }
+    }, 30000);
   });
 }
 

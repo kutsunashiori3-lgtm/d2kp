@@ -12,6 +12,19 @@
 import { Employee, AppSettings, RecognitionLog, ServerDatabaseStatus, ServerBackupInfo } from '../types';
 import { saveEmployees, getAllEmployees, clearAllEmployees } from './database';
 import { getStoredToken } from './authService';
+import { loadFaceModels, extractEmbeddingFromUrl } from './faceRecognition';
+
+export interface ServerSyncSummary {
+  totalEmployees: number;
+  totalPhotos: number;
+  totalEmbeddings: number;
+  newPhotos: number;
+  updatedPhotos: number;
+  missingPhotos: number;
+  unmatchedPhotos: number;
+  excelFileName: string;
+  syncTime: string;
+}
 
 function getAuthHeaders(includeContentType = true): HeadersInit {
   const headers: Record<string, string> = {};
@@ -413,5 +426,144 @@ export async function resetServerDatabase(): Promise<boolean> {
   } catch (err) {
     console.error('resetServerDatabase error:', err);
     return false;
+  }
+}
+
+/**
+ * Fetch Server Folder Sync Status
+ */
+export async function fetchServerSyncStatus(): Promise<any | null> {
+  try {
+    const res = await fetch('/api/sync/status', {
+      headers: getAuthHeaders(false),
+      credentials: 'include',
+    });
+    const { ok, data } = await safeReadJson<any>(res);
+    if (!ok || !data) return null;
+    return data;
+  } catch (err) {
+    console.error('fetchServerSyncStatus error:', err);
+    return null;
+  }
+}
+
+/**
+ * Trigger full server folder scan, detect new/modified files, generate embeddings,
+ * and update master database.
+ */
+export async function triggerServerFolderSync(
+  onProgress?: (current: number, total: number, message: string) => void
+): Promise<ServerSyncSummary> {
+  onProgress?.(0, 100, 'Memindai folder /storage/excel/ dan /storage/photos/ di server...');
+
+  const scanRes = await fetch('/api/sync/scan', {
+    method: 'POST',
+    headers: getAuthHeaders(false),
+    credentials: 'include',
+  });
+
+  const { ok, data } = await safeReadJson<any>(scanRes);
+  if (!ok || !data) {
+    throw new Error('Gagal memindai folder server.');
+  }
+
+  const pendingPhotos = data.pendingPhotos || [];
+  let successEmbeddings = 0;
+
+  if (pendingPhotos.length > 0) {
+    onProgress?.(10, 100, `Menyiapkan model AI untuk ${pendingPhotos.length} foto baru/diubah...`);
+    await loadFaceModels();
+
+    const results: Array<{
+      nomorInduk: string;
+      descriptor?: number[];
+      status: string;
+      error?: string;
+    }> = [];
+
+    for (let i = 0; i < pendingPhotos.length; i++) {
+      const item = pendingPhotos[i];
+      onProgress?.(
+        i + 1,
+        pendingPhotos.length,
+        `Mengekstrak biometrik wajah foto ${item.nomorInduk} (${i + 1}/${pendingPhotos.length})...`
+      );
+
+      const embResult = await extractEmbeddingFromUrl(item.photoUrl);
+      if (embResult.descriptor && embResult.status === 'ready') {
+        successEmbeddings++;
+      }
+
+      results.push({
+        nomorInduk: item.nomorInduk,
+        descriptor: embResult.descriptor,
+        status: embResult.status,
+        error: embResult.errorMessage,
+      });
+    }
+
+    onProgress?.(pendingPhotos.length, pendingPhotos.length, 'Menyimpan embedding baru ke server...');
+    await fetch('/api/sync/apply-embeddings', {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ results }),
+      credentials: 'include',
+    });
+  }
+
+  // Update local IndexedDB cache with newest server data
+  onProgress?.(100, 100, 'Memperbarui cache lokal perangkat...');
+  await syncClientWithServerMaster();
+
+  return {
+    totalEmployees: Number(data.totalEmployees) || 0,
+    totalPhotos: Number(data.totalPhotos) || 0,
+    totalEmbeddings: Number(data.totalEmbeddings) || 0,
+    newPhotos: Number(data.newPhotosCount) || 0,
+    updatedPhotos: Number(data.updatedPhotosCount) || 0,
+    missingPhotos: Number(data.missingPhotosCount) || 0,
+    unmatchedPhotos: Number(data.unmatchedPhotosCount) || 0,
+    excelFileName: data.excelFileName || 'master_pegawai.xlsx',
+    syncTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
+/**
+ * Fetch raw sync log from server
+ */
+export async function fetchSyncLog(): Promise<string> {
+  try {
+    const res = await fetch('/api/sync/log', {
+      headers: getAuthHeaders(false),
+      credentials: 'include',
+    });
+    const { data } = await safeReadJson<{ log: string }>(res);
+    return data?.log || 'Log tidak tersedia.';
+  } catch {
+    return 'Gagal membaca log sinkronisasi.';
+  }
+}
+
+/**
+ * Fetch server storage files list
+ */
+export async function fetchServerStorageFiles(): Promise<{
+  excelFiles: Array<{ name: string; size: number; mtime: number; path: string }>;
+  totalPhotos: number;
+  photoSample: Array<{ name: string; nomorInduk: string; size: number; mtime: number; status: string; hasEmbedding: boolean }>;
+}> {
+  try {
+    const res = await fetch('/api/sync/files', {
+      headers: getAuthHeaders(false),
+      credentials: 'include',
+    });
+    const { data } = await safeReadJson<any>(res);
+    return {
+      excelFiles: data?.excelFiles || [],
+      totalPhotos: data?.totalPhotos || 0,
+      photoSample: data?.photoSample || [],
+    };
+  } catch {
+    return { excelFiles: [], totalPhotos: 0, photoSample: [] };
   }
 }

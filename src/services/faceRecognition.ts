@@ -150,6 +150,42 @@ export async function processEmployeePhoto(imgElement: HTMLImageElement): Promis
 }
 
 /**
+ * Extract face embedding descriptor directly from an image URL
+ */
+export async function extractEmbeddingFromUrl(photoUrl: string): Promise<{
+  status: 'ready' | 'no_face' | 'multi_face' | 'low_quality' | 'error';
+  descriptor?: number[];
+  errorMessage?: string;
+}> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = async () => {
+      try {
+        const res = await processEmployeePhoto(img);
+        resolve({
+          status: res.status as any,
+          descriptor: res.descriptor,
+          errorMessage: res.errorMessage,
+        });
+      } catch (err) {
+        resolve({
+          status: 'error',
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    img.onerror = () => {
+      resolve({
+        status: 'error',
+        errorMessage: 'Gagal memuat file foto dari server.',
+      });
+    };
+    img.src = photoUrl;
+  });
+}
+
+/**
  * Recognize all faces in a live video frame
  */
 export async function detectAndRecognizeFaces(

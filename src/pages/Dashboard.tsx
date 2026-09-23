@@ -2,11 +2,12 @@
  * Main Dashboard page showing statistics, validation status, quick actions,
  * and recent recognition activity.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { DatabaseStats, Employee, RecognitionLog, ServerDatabaseStatus } from '../types';
 import { AuthUser } from '../services/authService';
 import { getSampleEmployeesWithAvatars } from '../services/sampleDataGenerator';
 import { saveEmployees } from '../services/database';
+import { ServerFolderSyncModal } from '../components/ServerFolderSyncModal';
 import {
   Users,
   Camera,
@@ -24,6 +25,7 @@ import {
   Award,
   Server,
   HardDrive,
+  FolderSync,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -32,7 +34,7 @@ interface DashboardProps {
   recentLogs: RecognitionLog[];
   serverStatus?: ServerDatabaseStatus | null;
   currentUser?: AuthUser | null;
-  onNavigate: (tab: 'camera' | 'photo_identification' | 'server_db' | 'import_excel' | 'import_folder' | 'validation' | 'database' | 'history' | 'settings') => void;
+  onNavigate: (tab: 'camera' | 'photo_identification' | 'server_db' | 'server_sync' | 'import_excel' | 'import_folder' | 'validation' | 'database' | 'history' | 'settings') => void;
   onRefreshData: () => void;
 }
 
@@ -45,6 +47,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigate,
   onRefreshData,
 }) => {
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const handleLoadDemoData = async () => {
     if (confirm('Muat data contoh (5 pegawai BKPSDM, BKAD, Diskominfo lengkap dengan foto)? Ini memudahkan pengujian sistem.')) {
       const demoData = getSampleEmployeesWithAvatars();
@@ -106,29 +109,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <>
                 <button
                   type="button"
+                  onClick={() => setIsSyncModalOpen(true)}
+                  className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/30 flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>SINKRONISASI DATA SERVER</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigate('server_sync')}
+                  className="px-4 py-3 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white font-semibold text-xs rounded-xl backdrop-blur-xs border border-white/15 flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <FolderSync className="w-4 h-4 text-emerald-400" />
+                  <span>Penyimpanan Server</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => onNavigate('server_db')}
-                  className="px-4 py-3 bg-indigo-600/80 hover:bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-xs rounded-xl backdrop-blur-xs border border-indigo-400/30 flex items-center gap-2 transition-all cursor-pointer"
+                  className="px-4 py-3 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white font-semibold text-xs rounded-xl backdrop-blur-xs border border-white/15 flex items-center gap-2 transition-all cursor-pointer"
                 >
-                  <Server className="w-4 h-4 text-indigo-200" />
+                  <Server className="w-4 h-4 text-indigo-300" />
                   <span>Database Server</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onNavigate('import_excel')}
-                  className="px-4 py-3 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white font-semibold text-xs rounded-xl backdrop-blur-xs border border-white/15 flex items-center gap-2 transition-all cursor-pointer"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                  <span>Import Excel</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onNavigate('import_folder')}
-                  className="px-4 py-3 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white font-semibold text-xs rounded-xl backdrop-blur-xs border border-white/15 flex items-center gap-2 transition-all cursor-pointer"
-                >
-                  <FolderOpen className="w-4 h-4 text-blue-400" />
-                  <span>Import Foto</span>
                 </button>
               </>
             )}
@@ -157,44 +160,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {currentUser?.role === 'admin' && (
-          <button
-            type="button"
-            onClick={() => onNavigate('server_db')}
-            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <HardDrive className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Kelola Master Server</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsSyncModalOpen(true)}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Sinkronisasi Data Server</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('server_sync')}
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <FolderSync className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Folder Storage</span>
+            </button>
+          </div>
         )}
       </div>
 
-      {/* STATUS DATA SERVER (Single Source of Truth) */}
+      {/* STATUS DATA SERVER (Single Source of Truth - User Specification) */}
       <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 shadow-md">
         <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
           <div className="flex items-center gap-2 font-mono text-xs font-bold text-slate-300 uppercase tracking-wider">
             <Server className="w-4 h-4 text-emerald-400" />
-            <span>STATUS SERVER (Single Source of Truth)</span>
+            <span>DATA SERVER (Single Source of Truth)</span>
           </div>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Server Database : CONNECTED
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsSyncModalOpen(true)}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-lg flex items-center gap-1.5 font-mono cursor-pointer"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>SINKRONISASI SEKARANG</span>
+            </button>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              Status Server: CONNECTED
+            </span>
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 font-mono">
+
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-4 font-mono">
           <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
-            <div className="text-slate-400 text-xs">Database Pegawai</div>
+            <div className="text-slate-400 text-xs">Excel Master</div>
+            <div className="text-base font-bold text-blue-400 mt-1 truncate" title={serverStatus?.excelFileName || 'master_pegawai.xlsx'}>
+              {serverStatus?.excelFileName || 'master_pegawai.xlsx'}
+            </div>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">/storage/excel/</span>
+          </div>
+
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="text-slate-400 text-xs">Jumlah Pegawai</div>
             <div className="text-xl font-extrabold text-white mt-1">
               {serverStatus ? serverStatus.employeeCount.toLocaleString('id-ID') : '...'}
             </div>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Tersimpan di Server</span>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">Database Server</span>
           </div>
+
           <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
-            <div className="text-slate-400 text-xs">Foto Pegawai</div>
+            <div className="text-slate-400 text-xs">Jumlah Foto</div>
             <div className="text-xl font-extrabold text-emerald-400 mt-1">
               {serverStatus ? serverStatus.photoCount.toLocaleString('id-ID') : '...'}
             </div>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Storage Foto Server</span>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">/storage/photos/</span>
           </div>
+
           <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
             <div className="text-slate-400 text-xs">Face Embedding</div>
             <div className="text-xl font-extrabold text-purple-400 mt-1">
@@ -202,19 +236,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <span className="text-[10px] text-slate-400 mt-0.5 block">128-D Vektor Wajah</span>
           </div>
+
           <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
-            <div className="text-slate-400 text-xs">Excel Master</div>
-            <div className="text-xl font-extrabold text-blue-400 mt-1">
-              {serverStatus?.excelFileName ? 'Tersedia' : 'Belum Ada'}
+            <div className="text-slate-400 text-xs">Foto Belum Diproses</div>
+            <div className="text-xl font-extrabold text-amber-400 mt-1">
+              {serverStatus ? Math.max(0, serverStatus.photoCount - serverStatus.embeddingCount).toLocaleString('id-ID') : '0'}
             </div>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">{serverStatus?.excelFileName || 'pegawai.xlsx'}</span>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">Perlu Sinkron</span>
           </div>
+
           <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
-            <div className="text-slate-400 text-xs">Server Database</div>
-            <div className="text-xl font-extrabold text-emerald-400 mt-1 flex items-center gap-1.5">
-              <span>CONNECTED</span>
+            <div className="text-slate-400 text-xs">Terakhir Sinkronisasi</div>
+            <div className="text-xs font-bold text-slate-200 mt-2 truncate">
+              {serverStatus?.lastUpdated
+                ? new Date(serverStatus.lastUpdated).toLocaleString('id-ID', {
+                    day: 'numeric',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : 'Belum Ada'}
             </div>
-            <span className="text-[10px] text-emerald-300 mt-0.5 block">Port 3000 Active</span>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">Waktu Server</span>
           </div>
         </div>
       </div>
@@ -494,6 +537,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Server Folder Sync Modal */}
+      <ServerFolderSyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onSyncComplete={() => {
+          onRefreshData();
+        }}
+      />
     </div>
   );
 };

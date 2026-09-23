@@ -17,12 +17,16 @@ import {
   fetchServerStatus,
   syncClientWithServerMaster,
   syncAllDataToServer,
+  fetchServerSyncStatus,
+  triggerServerFolderSync,
 } from './services/serverDbService';
 import { LoginPage } from './components/LoginPage';
 import { Dashboard } from './pages/Dashboard';
 import { CameraView } from './components/CameraView';
 import { PhotoIdentification } from './components/PhotoIdentification';
 import { ServerDatabasePanel } from './components/ServerDatabasePanel';
+import { ServerFolderSyncPanel } from './components/ServerFolderSyncPanel';
+import { ServerFolderSyncModal } from './components/ServerFolderSyncModal';
 import { ExcelImporter } from './components/ExcelImporter';
 import { FolderImporter } from './components/FolderImporter';
 import { DatabaseTable } from './components/DatabaseTable';
@@ -36,6 +40,7 @@ import {
   Server,
   FileSpreadsheet,
   FolderOpen,
+  FolderSync,
   Users,
   CheckSquare,
   History,
@@ -44,6 +49,7 @@ import {
   Lock,
   LogOut,
   User as UserIcon,
+  RefreshCw,
 } from 'lucide-react';
 
 type TabType =
@@ -51,6 +57,7 @@ type TabType =
   | 'camera'
   | 'photo_identification'
   | 'server_db'
+  | 'server_sync'
   | 'import_excel'
   | 'import_folder'
   | 'validation'
@@ -63,6 +70,7 @@ const VALID_TABS: TabType[] = [
   'camera',
   'photo_identification',
   'server_db',
+  'server_sync',
   'import_excel',
   'import_folder',
   'validation',
@@ -79,6 +87,7 @@ export default function App() {
 
   // App & Tab states
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const [isGlobalSyncModalOpen, setIsGlobalSyncModalOpen] = useState<boolean>(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [stats, setStats] = useState<DatabaseStats>({
     totalExcel: 0,
@@ -232,6 +241,31 @@ export default function App() {
     return () => clearInterval(timer);
   }, [sessionExpiresAt, authUser]);
 
+  // Periodic background check for folder synchronization (30 seconds)
+  useEffect(() => {
+    if (!authUser || authUser.role !== 'admin') return;
+
+    let isProcessing = false;
+    const checkServerFiles = async () => {
+      if (isProcessing) return;
+      try {
+        const syncStatus = await fetchServerSyncStatus();
+        if (syncStatus && syncStatus.pendingPhotosCount > 0) {
+          isProcessing = true;
+          await triggerServerFolderSync();
+          await refreshAllData();
+        }
+      } catch {
+        // Silently ignore background polling errors
+      } finally {
+        isProcessing = false;
+      }
+    };
+
+    const interval = setInterval(checkServerFiles, 30000);
+    return () => clearInterval(interval);
+  }, [authUser, refreshAllData]);
+
   // Handle Login Success from LoginPage
   const handleLoginSuccess = (user: AuthUser, expiresAt: number) => {
     setAuthUser(user);
@@ -300,6 +334,18 @@ export default function App() {
 
             {/* Right: Server Status, Embedding Badge, User Info & Logout */}
             <div className="flex items-center gap-3">
+              {/* SINKRONISASI DATA SERVER BUTTON (Admin) */}
+              {authUser.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => setIsGlobalSyncModalOpen(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Sinkronisasi Server</span>
+                </button>
+              )}
+
               {/* Server Online Badge */}
               <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-semibold text-indigo-900">
                 <Server className="w-3.5 h-3.5 text-indigo-600" />
@@ -385,6 +431,19 @@ export default function App() {
               <>
                 <button
                   type="button"
+                  onClick={() => navigateToTab('server_sync')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                    activeTab === 'server_sync'
+                      ? 'bg-blue-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <FolderSync className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Penyimpanan Server</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => navigateToTab('server_db')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
                     activeTab === 'server_db'
@@ -395,32 +454,6 @@ export default function App() {
                   <Server className="w-3.5 h-3.5 text-indigo-400" />
                   <span>Database Server</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigateToTab('import_excel')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
-                    activeTab === 'import_excel'
-                      ? 'bg-blue-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Import Excel</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigateToTab('import_folder')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
-                    activeTab === 'import_folder'
-                      ? 'bg-blue-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  <span>Import Folder Foto</span>
                 </button>
 
                 <button
@@ -448,7 +481,7 @@ export default function App() {
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Database Pegawai ({employees.length})</span>
+              <span>Data Pegawai</span>
             </button>
 
             <button
@@ -461,7 +494,7 @@ export default function App() {
               }`}
             >
               <History className="w-3.5 h-3.5" />
-              <span>Riwayat</span>
+              <span>Riwayat Presensi</span>
             </button>
 
             <button
@@ -500,6 +533,10 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'server_sync' && authUser.role === 'admin' && (
+              <ServerFolderSyncPanel />
+            )}
+
             {activeTab === 'server_db' && authUser.role === 'admin' && (
               <ServerDatabasePanel
                 onNavigateTab={(t) => navigateToTab(t)}
@@ -511,7 +548,7 @@ export default function App() {
               <CameraView
                 employees={employees}
                 settings={settings}
-                onNavigateToImport={() => navigateToTab('import_folder')}
+                onNavigateToImport={() => navigateToTab('server_sync')}
               />
             )}
 
@@ -523,22 +560,9 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'import_excel' && authUser.role === 'admin' && (
-              <ExcelImporter
-                onSuccess={() => {
-                  refreshAllData();
-                  setTimeout(() => navigateToTab('database'), 1200);
-                }}
-              />
-            )}
-
-            {activeTab === 'import_folder' && authUser.role === 'admin' && (
-              <FolderImporter
-                onSuccess={() => {
-                  refreshAllData();
-                  setTimeout(() => navigateToTab('camera'), 1500);
-                }}
-              />
+            {/* Fallback to server sync if old import route is triggered */}
+            {(activeTab === 'import_excel' || activeTab === 'import_folder') && authUser.role === 'admin' && (
+              <ServerFolderSyncPanel />
             )}
 
             {activeTab === 'validation' && authUser.role === 'admin' && (
@@ -582,6 +606,13 @@ export default function App() {
           </span>
         </div>
       </footer>
+
+      {/* Global Server Folder Sync Modal */}
+      <ServerFolderSyncModal
+        isOpen={isGlobalSyncModalOpen}
+        onClose={() => setIsGlobalSyncModalOpen(false)}
+        onSyncComplete={() => refreshAllData()}
+      />
     </div>
   );
 }

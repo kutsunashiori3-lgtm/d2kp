@@ -18,6 +18,7 @@ import {
   restoreDatabaseBackup,
   resetServerDatabase,
 } from '../services/serverDbService';
+import { ServerFolderSyncModal } from './ServerFolderSyncModal';
 import {
   Server,
   Database,
@@ -36,10 +37,11 @@ import {
   Trash2,
   ShieldCheck,
   Layers,
+  FolderSync,
 } from 'lucide-react';
 
 interface ServerDatabasePanelProps {
-  onNavigateTab: (tab: 'import_excel' | 'import_folder') => void;
+  onNavigateTab: (tab: any) => void;
   onDataUpdated: () => void;
 }
 
@@ -55,6 +57,7 @@ export const ServerDatabasePanel: React.FC<ServerDatabasePanelProps> = ({
   const [isRestoring, setIsRestoring] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
+  const [showFolderSyncModal, setShowFolderSyncModal] = useState<boolean>(false);
 
   const loadStatusAndBackups = async () => {
     setIsLoading(true);
@@ -413,33 +416,33 @@ export const ServerDatabasePanel: React.FC<ServerDatabasePanelProps> = ({
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {/* UPDATE EXCEL */}
+          {/* SINKRONISASI DATA SERVER */}
           <button
             type="button"
-            onClick={() => onNavigateTab('import_excel')}
-            className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100/60 active:bg-emerald-200/50 text-emerald-950 flex items-center gap-3 transition-all text-left group"
+            onClick={() => setShowFolderSyncModal(true)}
+            className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/60 active:bg-indigo-200/50 text-indigo-950 flex items-center gap-3 transition-all text-left group cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-              <FileSpreadsheet className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+              <RefreshCw className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-bold text-xs uppercase tracking-wide text-emerald-900">[ UPDATE EXCEL ]</div>
-              <div className="text-[11px] text-emerald-700 mt-0.5">Unggah berkas Excel pegawai baru ke server</div>
+              <div className="font-bold text-xs uppercase tracking-wide text-indigo-900">[ SINKRONISASI DATA SERVER ]</div>
+              <div className="text-[11px] text-indigo-700 mt-0.5">Pindai /storage/excel/ dan /storage/photos/</div>
             </div>
           </button>
 
-          {/* UPDATE FOTO */}
+          {/* STORAGE FOLDER SERVER */}
           <button
             type="button"
-            onClick={() => onNavigateTab('import_folder')}
-            className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100/60 active:bg-blue-200/50 text-blue-950 flex items-center gap-3 transition-all text-left group"
+            onClick={() => onNavigateTab('server_sync')}
+            className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100/60 active:bg-blue-200/50 text-blue-950 flex items-center gap-3 transition-all text-left group cursor-pointer"
           >
             <div className="w-10 h-10 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-              <FolderOpen className="w-5 h-5" />
+              <FolderSync className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-bold text-xs uppercase tracking-wide text-blue-900">[ UPDATE FOTO ]</div>
-              <div className="text-[11px] text-blue-700 mt-0.5">Import folder foto biometrik ke server</div>
+              <div className="font-bold text-xs uppercase tracking-wide text-blue-900">[ STORAGE FOLDER SERVER ]</div>
+              <div className="text-[11px] text-blue-700 mt-0.5">Kelola berkas folder server & catatan log</div>
             </div>
           </button>
 
@@ -593,6 +596,17 @@ export const ServerDatabasePanel: React.FC<ServerDatabasePanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* Server Folder Sync Modal */}
+      <ServerFolderSyncModal
+        isOpen={showFolderSyncModal}
+        onClose={() => setShowFolderSyncModal(false)}
+        onSyncComplete={async () => {
+          await loadStatusAndBackups();
+          await syncClientWithServerMaster();
+          onDataUpdated();
+        }}
+      />
     </div>
   );
 };

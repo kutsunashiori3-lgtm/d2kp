@@ -15,6 +15,17 @@ import path from 'path';
 import fs from 'fs';
 import * as XLSX from 'xlsx';
 
+// Safe XLSX helper for both ESM and CJS bundlers
+function getXLSX(): any {
+  if (typeof (XLSX as any).read === 'function') {
+    return XLSX;
+  }
+  if ((XLSX as any).default && typeof (XLSX as any).default.read === 'function') {
+    return (XLSX as any).default;
+  }
+  return XLSX;
+}
+
 // Storage root directory (configurable via env STORAGE_PATH)
 export const STORAGE_PATH = process.env.STORAGE_PATH || path.join(process.cwd(), 'storage');
 
@@ -31,7 +42,9 @@ const METADATA_FILE = path.join(DATABASE_PATH, 'metadata.json');
 const EMBEDDINGS_FILE = path.join(EMBEDDING_PATH, 'embeddings.json');
 const LOGS_FILE = path.join(LOG_PATH, 'recognition_history.json');
 const SETTINGS_FILE = path.join(SETTINGS_PATH, 'settings.json');
-const MASTER_EXCEL_FILE = path.join(EXCEL_PATH, 'pegawai.xlsx');
+const MASTER_EXCEL_FILE = path.join(EXCEL_PATH, 'master_pegawai.xlsx');
+export const SYNC_LOG_FILE = path.join(LOG_PATH, 'sync.log');
+export const FILE_TRACKING_FILE = path.join(DATABASE_PATH, 'file_tracking.json');
 
 export interface ServerEmployee {
   nomor_induk: string;
@@ -46,9 +59,55 @@ export interface ServerEmployee {
   photoFileName?: string;
   photoUrl?: string;
   faceDescriptor?: number[];
-  photoStatus: 'ready' | 'no_face' | 'multi_face' | 'error' | 'no_photo';
+  photoStatus: 'ready' | 'no_face' | 'multi_face' | 'low_quality' | 'error' | 'no_photo' | 'pending';
   photoError?: string;
   updatedAt: number;
+}
+
+export interface PhotoTrackInfo {
+  nomorInduk: string;
+  fileName: string;
+  mtime: number;
+  size: number;
+  status: 'ready' | 'no_face' | 'multi_face' | 'low_quality' | 'error' | 'pending';
+  hasEmbedding: boolean;
+  lastProcessed: number;
+  error?: string;
+}
+
+export interface ExcelTrackInfo {
+  fileName: string;
+  mtime: number;
+  size: number;
+  lastProcessed: number;
+  rowCount: number;
+}
+
+export interface FileTrackingData {
+  excel: ExcelTrackInfo | null;
+  photos: Record<string, PhotoTrackInfo>;
+}
+
+export interface ServerSyncResult {
+  success: boolean;
+  message: string;
+  excelFileName: string | null;
+  excelProcessed: boolean;
+  totalEmployees: number;
+  totalPhotos: number;
+  totalEmbeddings: number;
+  newPhotosCount: number;
+  updatedPhotosCount: number;
+  missingPhotosCount: number;
+  unmatchedPhotosCount: number;
+  deletedPhotosCount: number;
+  pendingPhotos: Array<{
+    nomorInduk: string;
+    fileName: string;
+    photoUrl: string;
+    reason: 'new' | 'modified';
+  }>;
+  syncTime: string;
 }
 
 export interface ServerMetadata {
@@ -648,4 +707,551 @@ export function resetServerDatabase(): void {
   }
 
   updateMetadataCounts(true);
+}
+
+/**
+ * Append entry to /storage/logs/sync.log
+ */
+export function appendSyncLog(message: string): void {
+  try {
+    const timestamp = new Date().toLocaleString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const logLine = `[${timestamp} WIB] ${message}\n`;
+    fs.appendFileSync(SYNC_LOG_FILE, logLine, 'utf-8');
+  } catch (err) {
+    console.error('Failed to append to sync.log:', err);
+  }
+}
+
+/**
+ * Read the latest lines from /storage/logs/sync.log
+ */
+export function getSyncLogContent(maxLines = 150): string {
+  try {
+    if (!fs.existsSync(SYNC_LOG_FILE)) {
+      return 'Belum ada catatan log sinkronisasi.';
+    }
+    const content = fs.readFileSync(SYNC_LOG_FILE, 'utf-8');
+    const lines = content.trim().split('\n');
+    return lines.slice(-maxLines).join('\n');
+  } catch {
+    return 'Gagal membaca file sync.log.';
+  }
+}
+
+/**
+ * Load file tracking cache from /storage/database/file_tracking.json
+ */
+export function loadFileTracking(): FileTrackingData {
+  try {
+    if (fs.existsSync(FILE_TRACKING_FILE)) {
+      const raw = fs.readFileSync(FILE_TRACKING_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    excel: null,
+    photos: {},
+  };
+}
+
+/**
+ * Save file tracking cache to /storage/database/file_tracking.json
+ */
+export function saveFileTracking(data: FileTrackingData): void {
+  try {
+    fs.writeFileSync(FILE_TRACKING_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save file tracking:', err);
+  }
+}
+
+/**
+ * Automatically export existing employees to /storage/excel/master_pegawai.xlsx
+ * if no excel file exists yet.
+ */
+export function ensureMasterExcelFile(): string | null {
+  try {
+    if (!fs.existsSync(EXCEL_PATH)) {
+      fs.mkdirSync(EXCEL_PATH, { recursive: true });
+    }
+
+    const existingFiles = fs.readdirSync(EXCEL_PATH).filter(
+      (f) => (f.endsWith('.xlsx') || f.endsWith('.xls')) && !f.startsWith('~$')
+    );
+
+    if (existingFiles.length > 0) {
+      const preferred = existingFiles.find((f) => f.toLowerCase() === 'master_pegawai.xlsx') || existingFiles[0];
+      return preferred;
+    }
+
+    const employees = getAllServerEmployees();
+    if (employees.length === 0) {
+      return null;
+    }
+
+    const rows = employees.map((emp) => {
+      const row: Record<string, unknown> = {
+        'NOMOR INDUK': emp.nomor_induk,
+        NIP: emp.nip || emp.nomor_induk,
+        'NAMA LENGKAP': emp.nama,
+        JABATAN: emp.jabatan || '-',
+        'PANGKAT / GOLONGAN': emp.pangkat_golongan || '-',
+        'UNIT KERJA': emp.unit_kerja || '-',
+        INSTANSI: emp.instansi || 'Pemerintah Kabupaten',
+      };
+      if (emp.extraFields) {
+        for (const [k, v] of Object.entries(emp.extraFields)) {
+          row[k] = v;
+        }
+      }
+      return row;
+    });
+
+    const xlsx = getXLSX();
+    const wb = xlsx.utils.book_new();
+    const ws = xlsx.utils.json_to_sheet(rows);
+    xlsx.utils.book_append_sheet(wb, ws, 'DATA PEGAWAI');
+    const targetFile = path.join(EXCEL_PATH, 'master_pegawai.xlsx');
+    const outBuf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    fs.writeFileSync(targetFile, outBuf);
+
+    appendSyncLog(`[INISIALISASI EXCEL] Dibuat file master_pegawai.xlsx otomatis (${employees.length} pegawai).`);
+    return 'master_pegawai.xlsx';
+  } catch (err) {
+    console.error('Failed to ensure master excel file:', err);
+    return null;
+  }
+}
+
+/**
+ * Scan server folders (/storage/excel/ and /storage/photos/) and synchronize with database
+ */
+export async function scanAndSyncServerFiles(): Promise<ServerSyncResult> {
+  const syncStartTime = new Date().toISOString();
+  appendSyncLog('[SINKRONISASI DIMULAI] Memeriksa folder /storage/excel/ dan /storage/photos/...');
+
+  const tracking = loadFileTracking();
+  let employees = getAllServerEmployees();
+  const existingEmbeddings = getAllEmbeddings();
+
+  // ==========================================
+  // 1. Scan and process /storage/excel/
+  // ==========================================
+  ensureMasterExcelFile();
+  let excelFileName: string | null = null;
+  let excelProcessed = false;
+
+  try {
+    const excelFiles = fs.readdirSync(EXCEL_PATH).filter(
+      (f) => (f.endsWith('.xlsx') || f.endsWith('.xls')) && !f.startsWith('~$')
+    );
+
+    if (excelFiles.length > 0) {
+      // Prioritize master_pegawai.xlsx, or latest modified
+      const sorted = excelFiles.sort((a, b) => {
+        if (a.toLowerCase() === 'master_pegawai.xlsx') return -1;
+        if (b.toLowerCase() === 'master_pegawai.xlsx') return 1;
+        const statA = fs.statSync(path.join(EXCEL_PATH, a));
+        const statB = fs.statSync(path.join(EXCEL_PATH, b));
+        return statB.mtimeMs - statA.mtimeMs;
+      });
+
+      excelFileName = sorted[0];
+      const excelFilePath = path.join(EXCEL_PATH, excelFileName);
+      const stat = fs.statSync(excelFilePath);
+
+      const needsExcelParse =
+        !tracking.excel ||
+        tracking.excel.fileName !== excelFileName ||
+        tracking.excel.mtime !== stat.mtimeMs ||
+        tracking.excel.size !== stat.size;
+
+      if (needsExcelParse) {
+        appendSyncLog(`[MEMBACA EXCEL] Mendeteksi file ${excelFileName} (diubah: ${new Date(stat.mtimeMs).toLocaleString('id-ID')})...`);
+        const xlsx = getXLSX();
+        const fileBuffer = fs.readFileSync(excelFilePath);
+        const wb = xlsx.read(fileBuffer, { type: 'buffer' });
+        const firstSheetName = wb.SheetNames[0];
+        if (firstSheetName) {
+          const ws = wb.Sheets[firstSheetName];
+          const rawRows = xlsx.utils.sheet_to_json(ws, { defval: '' }) as Record<string, unknown>[];
+
+          if (rawRows.length > 0) {
+            const empMap = new Map<string, ServerEmployee>();
+            employees.forEach((e) => empMap.set(e.nomor_induk, e));
+
+            let updatedCount = 0;
+            let insertedCount = 0;
+
+            for (const row of rawRows) {
+              const keys = Object.keys(row);
+              if (keys.length === 0) continue;
+
+              // Dynamic column detection
+              let idKey = keys.find((k) => /nomor\s*induk|no\.?\s*induk|id_pegawai|nik|nip/i.test(k));
+              if (!idKey) idKey = keys[0];
+
+              const nameKey = keys.find((k) => /^(nama|nama\s*lengkap|name)$/i.test(k));
+              const nipKey = keys.find((k) => /^nip$/i.test(k));
+              const jabatanKey = keys.find((k) => /jabatan|posisi|position/i.test(k));
+              const pangkatKey = keys.find((k) => /pangkat|golongan|pangkat\s*\/?\s*gol/i.test(k));
+              const unitKey = keys.find((k) => /unit|unit\s*kerja|bidang|divisi|bagian/i.test(k));
+              const instansiKey = keys.find((k) => /instansi|organisasi|perusahaan/i.test(k));
+
+              const rawId = String(row[idKey] ?? '').trim();
+              if (!rawId) continue;
+
+              const rawName = nameKey ? String(row[nameKey] ?? '').trim() : `Pegawai ${rawId}`;
+              const nipVal = nipKey ? String(row[nipKey] ?? '').trim() : undefined;
+              const jabatanVal = jabatanKey ? String(row[jabatanKey] ?? '').trim() : undefined;
+              const pangkatVal = pangkatKey ? String(row[pangkatKey] ?? '').trim() : undefined;
+              const unitVal = unitKey ? String(row[unitKey] ?? '').trim() : undefined;
+              const instansiVal = instansiKey ? String(row[instansiKey] ?? '').trim() : undefined;
+
+              const standardKeys = new Set([idKey, nameKey, nipKey, jabatanKey, pangkatKey, unitKey, instansiKey].filter(Boolean));
+              const extraFields: Record<string, string> = {};
+              for (const [k, v] of Object.entries(row)) {
+                if (!standardKeys.has(k) && String(v).trim()) {
+                  extraFields[k] = String(v).trim();
+                }
+              }
+
+              const existingEmp = empMap.get(rawId);
+              if (existingEmp) {
+                empMap.set(rawId, {
+                  ...existingEmp,
+                  nama: rawName || existingEmp.nama,
+                  nip: nipVal || existingEmp.nip,
+                  jabatan: jabatanVal || existingEmp.jabatan,
+                  pangkat_golongan: pangkatVal || existingEmp.pangkat_golongan,
+                  unit_kerja: unitVal || existingEmp.unit_kerja,
+                  instansi: instansiVal || existingEmp.instansi,
+                  extraFields: { ...(existingEmp.extraFields || {}), ...extraFields },
+                  updatedAt: Date.now(),
+                });
+                updatedCount++;
+              } else {
+                empMap.set(rawId, {
+                  nomor_induk: rawId,
+                  nama: rawName,
+                  nip: nipVal,
+                  jabatan: jabatanVal,
+                  pangkat_golongan: pangkatVal,
+                  unit_kerja: unitVal,
+                  instansi: instansiVal,
+                  extraFields,
+                  hasPhoto: false,
+                  photoStatus: 'no_photo',
+                  updatedAt: Date.now(),
+                });
+                insertedCount++;
+              }
+            }
+
+            employees = Array.from(empMap.values());
+            saveServerEmployees(employees);
+
+            tracking.excel = {
+              fileName: excelFileName,
+              mtime: stat.mtimeMs,
+              size: stat.size,
+              lastProcessed: Date.now(),
+              rowCount: rawRows.length,
+            };
+            excelProcessed = true;
+            appendSyncLog(`[EXCEL SELESAI] ${excelFileName}: ${rawRows.length} baris diproses (${updatedCount} diperbarui, ${insertedCount} baru).`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    appendSyncLog(`[ERROR EXCEL] Gagal memproses file Excel: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // ==========================================
+  // 2. Scan and process /storage/photos/
+  // ==========================================
+  let newPhotosCount = 0;
+  let updatedPhotosCount = 0;
+  let deletedPhotosCount = 0;
+  let missingPhotosCount = 0;
+  let unmatchedPhotosCount = 0;
+
+  const pendingPhotos: Array<{
+    nomorInduk: string;
+    fileName: string;
+    photoUrl: string;
+    reason: 'new' | 'modified';
+  }> = [];
+
+  const empMap = new Map<string, ServerEmployee>();
+  employees.forEach((e) => empMap.set(e.nomor_induk, e));
+
+  const validPhotoExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+  const photoFilesOnDisk = fs.readdirSync(PHOTO_PATH).filter((f) => {
+    const ext = path.extname(f).toLowerCase();
+    return validPhotoExts.has(ext);
+  });
+
+  const photoDiskSet = new Set(photoFilesOnDisk);
+
+  for (const fileName of photoFilesOnDisk) {
+    const parsed = path.parse(fileName);
+    const nomorInduk = parsed.name.trim();
+    const filePath = path.join(PHOTO_PATH, fileName);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      continue;
+    }
+
+    const prevTrack = tracking.photos[fileName];
+    const hasExistingEmbedding = Boolean(existingEmbeddings[nomorInduk] && existingEmbeddings[nomorInduk].length > 0);
+
+    if (!prevTrack) {
+      if (hasExistingEmbedding) {
+        // Photo already has an embedding from persistent storage; mark ready without recomputation!
+        tracking.photos[fileName] = {
+          nomorInduk,
+          fileName,
+          mtime: stat.mtimeMs,
+          size: stat.size,
+          status: 'ready',
+          hasEmbedding: true,
+          lastProcessed: Date.now(),
+        };
+      } else {
+        // Brand new photo needing face detection & descriptor generation
+        newPhotosCount++;
+        tracking.photos[fileName] = {
+          nomorInduk,
+          fileName,
+          mtime: stat.mtimeMs,
+          size: stat.size,
+          status: 'pending',
+          hasEmbedding: false,
+          lastProcessed: Date.now(),
+        };
+        pendingPhotos.push({
+          nomorInduk,
+          fileName,
+          photoUrl: `/api/photos/${nomorInduk}`,
+          reason: 'new',
+        });
+      }
+    } else if (prevTrack.mtime !== stat.mtimeMs || prevTrack.size !== stat.size) {
+      // Photo file was replaced or modified!
+      updatedPhotosCount++;
+      delete existingEmbeddings[nomorInduk];
+      tracking.photos[fileName] = {
+        nomorInduk,
+        fileName,
+        mtime: stat.mtimeMs,
+        size: stat.size,
+        status: 'pending',
+        hasEmbedding: false,
+        lastProcessed: Date.now(),
+      };
+      pendingPhotos.push({
+        nomorInduk,
+        fileName,
+        photoUrl: `/api/photos/${nomorInduk}`,
+        reason: 'modified',
+      });
+      appendSyncLog(`[FOTO DIPERBARUI] File ${fileName} (${nomorInduk}) telah diganti di folder server.`);
+    } else if (!prevTrack.hasEmbedding && !hasExistingEmbedding && prevTrack.status === 'pending') {
+      // Photo still pending embedding
+      pendingPhotos.push({
+        nomorInduk,
+        fileName,
+        photoUrl: `/api/photos/${nomorInduk}`,
+        reason: 'new',
+      });
+    }
+
+    // Match with employee record
+    const emp = empMap.get(nomorInduk);
+    if (emp) {
+      emp.hasPhoto = true;
+      emp.photoFileName = fileName;
+      emp.photoUrl = `/api/photos/${nomorInduk}`;
+      if (emp.photoStatus === 'no_photo') {
+        emp.photoStatus = hasExistingEmbedding ? 'ready' : 'pending';
+      }
+    } else {
+      // Photo exists on server, but not yet present in Excel!
+      unmatchedPhotosCount++;
+      const placeholder: ServerEmployee = {
+        nomor_induk: nomorInduk,
+        nama: `Pegawai ${nomorInduk}`,
+        unit_kerja: 'Data Excel Belum Diimpor',
+        hasPhoto: true,
+        photoFileName: fileName,
+        photoUrl: `/api/photos/${nomorInduk}`,
+        photoStatus: hasExistingEmbedding ? 'ready' : 'pending',
+        updatedAt: Date.now(),
+      };
+      empMap.set(nomorInduk, placeholder);
+      employees.push(placeholder);
+    }
+  }
+
+  // Detect deleted photos from /storage/photos/
+  for (const [trackedFile, info] of Object.entries(tracking.photos)) {
+    if (!photoDiskSet.has(trackedFile)) {
+      deletedPhotosCount++;
+      delete existingEmbeddings[info.nomorInduk];
+      const emp = empMap.get(info.nomorInduk);
+      if (emp) {
+        emp.hasPhoto = false;
+        emp.photoFileName = undefined;
+        emp.photoUrl = undefined;
+        emp.photoStatus = 'no_photo';
+        emp.faceDescriptor = undefined;
+        emp.updatedAt = Date.now();
+      }
+      delete tracking.photos[trackedFile];
+      appendSyncLog(`[FOTO DIHAPUS] Foto ${trackedFile} (${info.nomorInduk}) dihapus dari server.`);
+    }
+  }
+
+  // Count employees missing photos
+  for (const emp of employees) {
+    if (!emp.hasPhoto) {
+      missingPhotosCount++;
+    }
+  }
+
+  // Persist merged employees, tracking, and embeddings
+  saveServerEmployees(employees);
+  saveEmbeddings(existingEmbeddings);
+  saveFileTracking(tracking);
+  const status = updateMetadataCounts(true);
+
+  appendSyncLog(
+    `[SINKRONISASI SELESAI] Pegawai: ${employees.length}, Foto: ${photoFilesOnDisk.length}, Embedding Siap: ${status.embeddingCount}, Baru: ${newPhotosCount}, Diperbarui: ${updatedPhotosCount}, Dihapus: ${deletedPhotosCount}, Pending Embedding: ${pendingPhotos.length}.`
+  );
+
+  return {
+    success: true,
+    message: 'Sinkronisasi folder server berhasil dijalankan.',
+    excelFileName,
+    excelProcessed,
+    totalEmployees: employees.length,
+    totalPhotos: photoFilesOnDisk.length,
+    totalEmbeddings: status.embeddingCount,
+    newPhotosCount,
+    updatedPhotosCount,
+    missingPhotosCount,
+    unmatchedPhotosCount,
+    deletedPhotosCount,
+    pendingPhotos,
+    syncTime: syncStartTime,
+  };
+}
+
+/**
+ * Apply generated embeddings from face recognition to server database
+ */
+export async function applyEmbeddingResults(
+  results: Array<{
+    nomorInduk: string;
+    descriptor?: number[];
+    status: 'ready' | 'no_face' | 'multi_face' | 'low_quality' | 'error';
+    error?: string;
+  }>
+): Promise<ServerSyncResult> {
+  const tracking = loadFileTracking();
+  const employees = getAllServerEmployees();
+  const empMap = new Map<string, ServerEmployee>();
+  employees.forEach((e) => empMap.set(e.nomor_induk, e));
+  const embeddings = getAllEmbeddings();
+
+  let successCount = 0;
+  let failedCount = 0;
+
+  for (const res of results) {
+    const nomorInduk = String(res.nomorInduk).trim();
+    if (!nomorInduk) continue;
+
+    const emp = empMap.get(nomorInduk);
+
+    const photoFileName = getPhotoFilePath(nomorInduk);
+    const baseName = photoFileName ? path.basename(photoFileName) : `${nomorInduk}.jpg`;
+
+    if (Array.isArray(res.descriptor) && res.descriptor.length > 0 && res.status === 'ready') {
+      embeddings[nomorInduk] = res.descriptor;
+      if (emp) {
+        emp.faceDescriptor = res.descriptor;
+        emp.photoStatus = 'ready';
+        emp.photoError = undefined;
+        emp.updatedAt = Date.now();
+      }
+      tracking.photos[baseName] = {
+        nomorInduk,
+        fileName: baseName,
+        mtime: fs.existsSync(photoFileName || '') ? fs.statSync(photoFileName || '').mtimeMs : Date.now(),
+        size: fs.existsSync(photoFileName || '') ? fs.statSync(photoFileName || '').size : 0,
+        status: 'ready',
+        hasEmbedding: true,
+        lastProcessed: Date.now(),
+      };
+      successCount++;
+    } else {
+      delete embeddings[nomorInduk];
+      if (emp) {
+        emp.photoStatus = res.status;
+        emp.photoError = res.error;
+        emp.faceDescriptor = undefined;
+        emp.updatedAt = Date.now();
+      }
+      tracking.photos[baseName] = {
+        nomorInduk,
+        fileName: baseName,
+        mtime: fs.existsSync(photoFileName || '') ? fs.statSync(photoFileName || '').mtimeMs : Date.now(),
+        size: fs.existsSync(photoFileName || '') ? fs.statSync(photoFileName || '').size : 0,
+        status: res.status,
+        hasEmbedding: false,
+        lastProcessed: Date.now(),
+        error: res.error,
+      };
+      failedCount++;
+      appendSyncLog(`[VALIDASI FOTO GAGAL] Nomor Induk ${nomorInduk}: ${res.status} (${res.error || 'Wajah tidak memenuhi syarat'})`);
+    }
+  }
+
+  saveServerEmployees(employees);
+  saveEmbeddings(embeddings);
+  saveFileTracking(tracking);
+  const status = updateMetadataCounts(true);
+
+  appendSyncLog(`[EMBEDDING SELESAI] Diproses ${results.length} foto (${successCount} berhasil, ${failedCount} gagal/invalid). Total embedding aktif: ${status.embeddingCount}.`);
+
+  return {
+    success: true,
+    message: `Berhasil memproses embedding ${results.length} foto.`,
+    excelFileName: status.excelFileName || 'master_pegawai.xlsx',
+    excelProcessed: false,
+    totalEmployees: employees.length,
+    totalPhotos: status.photoCount,
+    totalEmbeddings: status.embeddingCount,
+    newPhotosCount: 0,
+    updatedPhotosCount: 0,
+    missingPhotosCount: employees.filter((e) => !e.hasPhoto).length,
+    unmatchedPhotosCount: 0,
+    deletedPhotosCount: 0,
+    pendingPhotos: [],
+    syncTime: new Date().toISOString(),
+  };
 }
